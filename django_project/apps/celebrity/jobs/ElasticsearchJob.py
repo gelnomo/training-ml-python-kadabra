@@ -1,6 +1,6 @@
 from overrides import override
 import face_recognition
-from apps.celebrity.document.schema import Faces
+from apps.document.schema import Faces
 from apps.celebrity.models import ElasticSearchActorImage
 from ms_data_mining.inteface import InterfaceJob
 
@@ -27,7 +27,7 @@ class ElasticsearchJob(InterfaceJob):
                 "name": obj_elasticsearch.actor_image.actor.name,
                 "image_id": str(obj_elasticsearch.actor_image.id),
                 "actor_id": str(obj_elasticsearch.actor_image.actor.id),
-                "face_encoding": face_encoding.tolist()
+                "face_encoding": face_encoding.tolist(),
             }
 
             if faces.check_by_document_id(item_id):

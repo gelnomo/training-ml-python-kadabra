@@ -116,9 +116,7 @@ class ActorImageAdmin(ImportExportModelAdmin):
         "attempt",
         "created",
     )
-    search_fields = (
-        "id",
-    )
+    search_fields = ("id",)
     list_filter = (("created", DateRangeFilter), "keyword", "status", "is_valid")
     resource_class = ActorImageResource
     actions = [
@@ -159,6 +157,7 @@ class ElasticSearchActorImageAdmin(ImportExportModelAdmin):
         "updated",
         "id",
     )
+    raw_id_fields = ["actor_image"]
     list_display = (
         "id",
         "status",
@@ -166,9 +165,7 @@ class ElasticSearchActorImageAdmin(ImportExportModelAdmin):
         "created",
         "updated",
     )
-    search_fields = (
-        "id",
-    )
+    search_fields = ("id",)
     list_filter = (("created", DateRangeFilter), "status")
     actions = [
         "process",

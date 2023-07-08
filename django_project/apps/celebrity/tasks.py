@@ -20,7 +20,7 @@ def actor_process(self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_i
 
 @shared_task(bind=True, name="actor_process_long_task")
 def actor_process_long_task(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_id=None
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -33,7 +33,7 @@ def actor_process_long_task(
 
 @shared_task(bind=True, name="actor_process_error")
 def actor_process_error(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_id=None
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -46,7 +46,7 @@ def actor_process_error(
 
 @shared_task(bind=True, name="actor_image_process")
 def actor_image_process(
-        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
+    self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -59,7 +59,7 @@ def actor_image_process(
 
 @shared_task(bind=True, name="actor_image_process_long_task")
 def actor_image_process_long_task(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -72,7 +72,7 @@ def actor_image_process_long_task(
 
 @shared_task(bind=True, name="actor_image_process_error")
 def actor_image_process_error(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, actor_image_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -83,9 +83,9 @@ def actor_image_process_error(
     print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
 
 
-@shared_task(bind=True, name="elasticsearch_process")
-def elasticsearch_process(
-        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+@shared_task(bind=True, name="elasticsearch_actor_images_process")
+def elasticsearch_actor_images_process(
+    self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -96,9 +96,9 @@ def elasticsearch_process(
     print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
 
 
-@shared_task(bind=True, name="elasticsearch_process_long_task")
-def elasticsearch_process_long_task(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+@shared_task(bind=True, name="elasticsearch_actor_images_process_long_task")
+def elasticsearch_actor_images_process_long_task(
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -109,9 +109,9 @@ def elasticsearch_process_long_task(
     print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
 
 
-@shared_task(bind=True, name="elasticsearch_process_error")
-def elasticsearch_process_error(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+@shared_task(bind=True, name="elasticsearch_actor_images_process_error")
+def elasticsearch_actor_images_process_error(
+    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"

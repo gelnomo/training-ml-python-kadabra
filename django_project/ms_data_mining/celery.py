@@ -24,7 +24,7 @@ task_schedule = {
     }
 }
 
-app.conf.beat_schedule = (celebrity_task.task_schedule | movie_task.task_schedule)
+app.conf.beat_schedule = celebrity_task.task_schedule | movie_task.task_schedule
 
 
 @app.task(bind=True, name="redis-flush_all")

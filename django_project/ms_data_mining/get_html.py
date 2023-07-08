@@ -5,7 +5,7 @@ from fake_useragent import UserAgent
 
 def download_page(url: str) -> object:
     try:
-        ua = UserAgent(browsers=['edge', 'chrome'])
+        ua = UserAgent(browsers=["edge", "chrome"])
         agent = ua.random
         headers = {"User-Agent": agent}
         req = urllib.request.Request(url, headers=headers)

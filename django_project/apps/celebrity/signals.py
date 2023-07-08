@@ -1,7 +1,7 @@
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 import os
-from apps.celebrity.document.schema import Faces
+from apps.document.schema import Faces
 from apps.celebrity.models import ElasticSearchActorImage
 
 

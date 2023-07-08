@@ -6,7 +6,8 @@ import time
 from apps.celebrity.models import Actor
 from ms_data_mining.get_html import download_page
 from ms_data_mining.inteface import InterfaceJob
-from apps.movies.models import Movie, MovieActor
+from apps.celebrity.enums import StatusEnum
+from apps.movies.models import Movie, MovieActor, ElasticSearchMovie
 from django.conf import settings
 import json
 from django.utils.text import slugify
@@ -364,16 +365,17 @@ class MovieJob(InterfaceJob):
 
     @staticmethod
     def __create_actors(obj_movie):
-        imdb_ids = obj_movie.starts_id.split(',')
-        celebrities = obj_movie.starts_name.split(',')
+        imdb_ids = obj_movie.starts_id.split(",")
+        celebrities = obj_movie.starts_name.split(",")
 
         for key, value in enumerate(celebrities):
             imdb_id = None
             if key <= len(imdb_ids):
                 imdb_id = imdb_ids[key]
             try:
-                obj_actor, created = Actor.objects.get_or_create(name=value.strip(), slug=slugify(value.strip()),
-                                                                 imdb_id=imdb_id)
+                obj_actor, created = Actor.objects.get_or_create(
+                    name=value.strip(), slug=slugify(value.strip()), imdb_id=imdb_id
+                )
                 MovieActor.objects.get_or_create(movie=obj_movie, actor=obj_actor)
             except Exception as ex:
                 print(ex)
@@ -409,7 +411,7 @@ class MovieJob(InterfaceJob):
         result = result.replace("\\xc3", "")
         result = result.replace("\\xb4", "o")
         result = result.replace(r"\x94", "O")
-        result = result.replace('\\x88', '')
+        result = result.replace("\\x88", "")
         result = result.replace(r"\xa9", "")
         result = result.replace(r"\'", "'")
         result = result.replace(r"\xb6", "")
@@ -426,7 +428,10 @@ class MovieJob(InterfaceJob):
             url = f"https://www.imdb.com/title/{obj_movie.imdb_id.strip()}/fullcredits"
             raw_html = download_page(url)
             time.sleep(random.randint(1, 4))
-            items = [content.find_all("a") for content in raw_html.find_all("table", class_="cast_list")]
+            items = [
+                content.find_all("a")
+                for content in raw_html.find_all("table", class_="cast_list")
+            ]
             if items:
                 items = items[0]
 
@@ -436,13 +441,15 @@ class MovieJob(InterfaceJob):
             for item in items:
                 text_id = re.findall(r"\/name\/\w+", item.get("href"))
                 if text_id:
-                    a_id = text_id[0].replace('/name/', '')
+                    a_id = text_id[0].replace("/name/", "")
                     if a_id not in starts_id:
                         starts_id.append(a_id)
 
                         img_start = item.find_all("img")
                         if img_start:
-                            img_start = self.__change_chars(item.find_all("img")[0].get("title"))
+                            img_start = self.__change_chars(
+                                item.find_all("img")[0].get("title")
+                            )
                         else:
                             img_start = self.__change_chars(item.text)
 
@@ -472,7 +479,10 @@ class MovieJob(InterfaceJob):
 
         movie_url, payload = self.__get_info_movie(year, name, obj_movie)
 
-        if payload.get("imdbID", "").lower().strip() != obj_movie.imdb_id.lower().strip():
+        if (
+                payload.get("imdbID", "").lower().strip()
+                != obj_movie.imdb_id.lower().strip()
+        ):
             obj_movie.payload = payload
             obj_movie.save()
             return
@@ -500,15 +510,24 @@ class MovieJob(InterfaceJob):
             raw_html = download_page(url)
             time.sleep(random.randint(1, 4))
 
-            items = [detail.find_all("div", "ipc-html-content-inner-div")[0] for content in
-                     raw_html.find_all("div", class_="sc-f65f65be-0 fVkLRr") if
-                     content.get("data-testid") == "sub-section-synopsis" for detail in
-                     content.find_all("div", "ipc-html-content ipc-html-content--base") if
-                     detail.find_all("div", "ipc-html-content-inner-div")]
+            items = [
+                detail.find_all("div", "ipc-html-content-inner-div")[0]
+                for content in raw_html.find_all("div", class_="sc-f65f65be-0 fVkLRr")
+                if content.get("data-testid") == "sub-section-synopsis"
+                for detail in content.find_all(
+                    "div", "ipc-html-content ipc-html-content--base"
+                )
+                if detail.find_all("div", "ipc-html-content-inner-div")
+            ]
             if not items:
                 return
 
             obj_movie.description += f"\n{items[0].text}"
             obj_movie.save()
+
+            ElasticSearchMovie.objects.update_or_create(
+                movie=obj_movie,
+                defaults={"status": StatusEnum.READY, "attempt": 0},
+            )
         except Exception as ex:
             print(ex)

@@ -18,8 +18,12 @@ import emoji
 
 class ActorJob(InterfaceJob):
     JOB_MODEL = Actor
-    HAARCASCADE = ["haarcascade_frontalface_alt_tree.xml", "haarcascade_frontalface_alt.xml",
-                   "haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_default.xml"]
+    HAARCASCADE = [
+        "haarcascade_frontalface_alt_tree.xml",
+        "haarcascade_frontalface_alt.xml",
+        "haarcascade_frontalface_alt2.xml",
+        "haarcascade_frontalface_default.xml",
+    ]
 
     @override
     def internal_process(self, item_id: str) -> bool:
@@ -34,7 +38,8 @@ class ActorJob(InterfaceJob):
 
         try:
             os.makedirs(
-                f"{settings.STATIC_ROOT}/images/celebrities/{actor.name.strip()}/IMDB")
+                f"{settings.STATIC_ROOT}/images/celebrities/{actor.name.strip()}/IMDB"
+            )
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
@@ -53,12 +58,15 @@ class ActorJob(InterfaceJob):
 
         number_faces = []
         for item in self.HAARCASCADE:
-            cascade = cv2.CascadeClassifier(f'apps/celebrity/jobs/haarcascade/{item}')
+            cascade = cv2.CascadeClassifier(f"apps/celebrity/jobs/haarcascade/{item}")
             img = cv2.imdecode(arr, -1)
-            faces = cascade.detectMultiScale(image=img, scaleFactor=1.1,
-                                             minNeighbors=5,
-                                             minSize=(30, 30),
-                                             flags=cv2.CASCADE_SCALE_IMAGE)
+            faces = cascade.detectMultiScale(
+                image=img,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                flags=cv2.CASCADE_SCALE_IMAGE,
+            )
             number_faces.append(len(faces))
 
         if number_faces == [0, 1, 1, 1] or number_faces == [1, 1, 1, 1]:
@@ -74,7 +82,11 @@ class ActorJob(InterfaceJob):
         else:
             return []
 
-        return [image[r'\nsrc'] for item in grid.find_all("a") for image in item.find_all('img')]
+        return [
+            image[r"\nsrc"]
+            for item in grid.find_all("a")
+            for image in item.find_all("img")
+        ]
 
     def __image_from_imdb(self, actor, page):
         webpage = f"https://www.imdb.com/name/{actor.imdb_id}/mediaindex?page={page}"
@@ -98,14 +110,19 @@ class ActorJob(InterfaceJob):
                     url=_image[0],
                     defaults={"status": StatusEnum.READY},
                 )
-            print(emoji.emojize(":thumbs_up:") if is_valid else emoji.emojize(":collision:"))
+            print(
+                emoji.emojize(":thumbs_up:")
+                if is_valid
+                else emoji.emojize(":collision:")
+            )
         return result + self.__image_from_imdb(actor, page + 1)
 
     def __image_from_google(self, actor, search):
         for keyword in KeywordsEnum:
             try:
                 os.makedirs(
-                    f"{settings.STATIC_ROOT}/images/celebrities/{actor.name.strip()}/{keyword.replace(' ', '')}")
+                    f"{settings.STATIC_ROOT}/images/celebrities/{actor.name.strip()}/{keyword.replace(' ', '')}"
+                )
             except OSError as e:
                 if e.errno != errno.EEXIST:
                     raise
@@ -127,7 +144,11 @@ class ActorJob(InterfaceJob):
                         url=_image[0],
                         defaults={"status": StatusEnum.READY},
                     )
-                print(emoji.emojize(":thumbs_up:") if is_valid else emoji.emojize(":collision:"))
+                print(
+                    emoji.emojize(":thumbs_up:")
+                    if is_valid
+                    else emoji.emojize(":collision:")
+                )
 
     @staticmethod
     def __images_get_all_items(page):
@@ -139,8 +160,17 @@ class ActorJob(InterfaceJob):
             url = f"https://www.imdb.com/name/{obj_actor.imdb_id.replace(' ', '%20')}"
             raw_html = download_page(url)
             time.sleep(random.randint(1, 4))
-            items = list(set([content.text for content in raw_html.find_all("span", class_="sc-dec7a8b-2 haviXP") if
-                              content.text != "Born"]))
+            items = list(
+                set(
+                    [
+                        content.text
+                        for content in raw_html.find_all(
+                            "span", class_="sc-dec7a8b-2 haviXP"
+                        )
+                        if content.text != "Born"
+                    ]
+                )
+            )
 
             for item in items:
                 obj_actor.birthday = item

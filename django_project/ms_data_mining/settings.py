@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import environ
+from apps.botAI.load_model import LoadModel
 
 root = environ.Path(__file__)
 env = environ.Env(
@@ -8,9 +9,9 @@ env = environ.Env(
     ALLOWED_HOSTS=(list, []),
 )
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
+SECRETS_PATH_FILE = os.environ.get("SECRETS_PATH_FILE", None)
+environ.Env.read_env(SECRETS_PATH_FILE)
 BASE_DIR = Path(__file__).resolve().parent.parent
-environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
-
 SITE_ROOT = os.path.abspath(os.path.dirname(__name__))
 SECRET_KEY = env("SECRET_KEY", default="")
 DEBUG = env.bool("DEBUG", default=False)
@@ -37,6 +38,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "import_export",
     "django_admin_inline_paginator",
+    "adrf",
     # Apps
     "apps.celebrity.apps.CelebrityConfig",
     "apps.movies.apps.MoviesConfig",
@@ -113,12 +115,13 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 PROJECT_DIR = os.path.abspath(os.path.dirname(__file__))
-STATIC_ROOT = os.path.join(PROJECT_DIR, 'static')
+STATIC_ROOT = os.path.join(PROJECT_DIR, "static")
 STATIC_URL = "static/"
 
 # CORS SECTION
 CORS_ORIGIN_ALLOW_ALL = env.bool("CORS_ORIGIN_ALLOW_ALL", default=True)
 CORS_ORIGIN_WHITELIST = env("CORS_ORIGIN_WHITELIST").split(",")
+CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS").split(",")
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -166,6 +169,9 @@ CELERY_TASK_TRACK_STARTED = True
 CELERYD_PREFETCH_MULTIPLIER = 1
 
 # CONSTANCE SECTION
+CONSTANCE_REDIS_CONNECTION = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+CONSTANCE_IGNORE_ADMIN_VERSION_CHECK = True
+CONSTANCE_SUPERUSER_ONLY = True
 CONSTANCE_ADDITIONAL_FIELDS = {
     "time_type_enum": [
         "django.forms.fields.ChoiceField",
@@ -211,5 +217,14 @@ IMDBID_APIKEY = env("IMDBID_APIKEY", default="")
 ELASTICSEARCH_HOST = env("ELASTICSEARCH_HOST", default="")
 ELASTICSEARCH_USER = env("ELASTICSEARCH_USER", default="")
 ELASTICSEARCH_PWD = env("ELASTICSEARCH_PWD", default="")
+ELASTICSEARCH_NUM_SHARDS = env("ELASTICSEARCH_NUM_SHARDS", default=1)
+ELASTICSEARCH_NUM_REPLICAS = env("ELASTICSEARCH_NUM_REPLICAS", default=1)
 ELASTICSEARCH_VERIFY_CERTS = env.bool("ELASTICSEARCH_VERIFY_CERTS", default=False)
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10240
+
+BOT_TOKEN = env("BOT_TOKEN", default="")
+BOT_USER_NAME = env("BOT_USER_NAME", default="")
+BOT_URL = env("BOT_URL", default="")
+
+# Load model
+LoadModel().get_embed()

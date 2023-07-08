@@ -79,3 +79,35 @@ class MovieActor(models.Model):
             models.Index(fields=["created"], name="MA_created_idx"),
         ]
         unique_together = ["movie", "actor"]
+
+
+class ElasticSearchMovie(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    movie = models.ForeignKey(Movie, on_delete=models.CASCADE)
+    status = models.CharField(
+        max_length=50,
+        default=StatusEnum.READY,
+        choices=StatusEnum.choices,
+    )
+    attempt = models.IntegerField(default=0, null=False, blank=False)
+    created = models.DateTimeField(
+        null=False, blank=False, auto_now_add=True, editable=False
+    )
+    updated = models.DateTimeField(null=True, blank=True, auto_now=True, editable=False)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.__dict__!r})"
+
+    def __str__(self):
+        return f"{self.id}"
+
+    class Meta:
+        db_table = "elasticsearch_movie"
+        verbose_name = "Elasticsearch Movie"
+        verbose_name_plural = "Elasticsearch Movies"
+        ordering = ["-created", "-updated"]
+        indexes = [
+            models.Index(fields=["status"], name="EM_status_idx"),
+            models.Index(fields=["created"], name="EM_created_idx"),
+            models.Index(fields=["created", "status"], name="EM_created_status_idx"),
+        ]

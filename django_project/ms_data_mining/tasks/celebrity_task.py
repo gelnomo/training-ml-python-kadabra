@@ -31,18 +31,18 @@ task_schedule = {
         "schedule": crontab(hour="*", minute=1),
         "enabled": True,
     },
-    "elasticsearch_process": {
-        "task": "elasticsearch_process",
+    "elasticsearch_actor_images_process": {
+        "task": "elasticsearch_actor_images_process",
         "schedule": crontab(minute="*/5"),
         "enabled": True,
     },
-    "elasticsearch_process_long_task": {
-        "task": "elasticsearch_process_long_task",
+    "elasticsearch_actor_images_process_long_task": {
+        "task": "elasticsearch_actor_images_process_long_task",
         "schedule": crontab(minute=0, hour=1),
         "enabled": True,
     },
-    "elasticsearch_process_error": {
-        "task": "elasticsearch_process_error",
+    "elasticsearch_actor_images_process_error": {
+        "task": "elasticsearch_actor_images_process_error",
         "schedule": crontab(hour="*", minute=1),
         "enabled": True,
     },

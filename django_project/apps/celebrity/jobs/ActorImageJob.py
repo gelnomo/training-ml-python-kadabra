@@ -21,12 +21,10 @@ class ActorImageJob(InterfaceJob):
         return is_completed
 
     def __download_images(self, obj_actor_image):
-        ua = UserAgent(browsers=['edge', 'chrome'])
+        ua = UserAgent(browsers=["edge", "chrome"])
         req = urllib.request.Request(
             obj_actor_image.url,
-            headers={
-                "User-Agent": ua.random
-            },
+            headers={"User-Agent": ua.random},
         )
         response = urllib.request.urlopen(req, None, 15)
 
@@ -58,5 +56,3 @@ class ActorImageJob(InterfaceJob):
                 defaults={"status": StatusEnum.READY, "attempt": 0},
             )
         obj_actor_image.save()
-
-

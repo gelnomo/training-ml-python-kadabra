@@ -2,8 +2,10 @@ from django.contrib import admin, messages
 from constance import config
 from rangefilter.filters import DateRangeFilter
 from django.utils.translation import ngettext
+
+from apps.movies.jobs.ElasticsearchJob import ElasticsearchJob
 from apps.movies.jobs.MovieJob import MovieJob
-from apps.movies.models import Movie, MovieActor
+from apps.movies.models import Movie, MovieActor, ElasticSearchMovie
 from import_export.admin import ImportExportModelAdmin
 from import_export import resources
 
@@ -20,7 +22,9 @@ class MovieActorAdminInline(admin.TabularInline):
     classes = [
         "collapse",
     ]
-    fields = ["actor", ]
+    fields = [
+        "actor",
+    ]
     extra = 0
 
 
@@ -69,6 +73,48 @@ class MovieAdmin(ImportExportModelAdmin):
             ngettext(
                 "%d movie was successfully executed.",
                 "%d movies were successfully executed.",
+                count,
+            )
+            % count,
+            messages.SUCCESS,
+        )
+
+    process.allowed_permissions = ["view"]
+    process.short_description = "Process"
+
+
+@admin.register(ElasticSearchMovie)
+class ElasticSearchMovieAdmin(ImportExportModelAdmin):
+    list_per_page = config.CONFIG_ADMIN_LIMIT
+    readonly_fields = (
+        "created",
+        "updated",
+        "id",
+    )
+    raw_id_fields = ["movie"]
+    list_display = (
+        "id",
+        "status",
+        "attempt",
+        "created",
+        "updated",
+    )
+    search_fields = ("id", "movie__id")
+    list_filter = (("created", DateRangeFilter), "status")
+    actions = [
+        "process",
+    ]
+
+    def process(self, request, queryset):
+        count = queryset.count()
+        for item in queryset:
+            ElasticsearchJob(0, 1, item.id).process()
+
+        self.message_user(
+            request,
+            ngettext(
+                "%d document was successfully executed.",
+                "%d documents were successfully executed.",
                 count,
             )
             % count,

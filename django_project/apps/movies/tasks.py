@@ -1,6 +1,8 @@
 from celery import shared_task
 from constance import config
 import memory_profiler as mem_profile
+
+from apps.movies.jobs.ElasticsearchJob import ElasticsearchJob
 from apps.movies.jobs.MovieJob import MovieJob
 
 
@@ -17,7 +19,7 @@ def movie_process(self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_i
 
 @shared_task(bind=True, name="movie_process_long_task")
 def movie_process_long_task(
-    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
+        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -30,12 +32,51 @@ def movie_process_long_task(
 
 @shared_task(bind=True, name="movie_process_error")
 def movie_process_error(
-    self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
+        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
     )
 
     MovieJob(size, attempts, movie_id).process_error()
+
+    print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
+
+
+@shared_task(bind=True, name="elasticsearch_movie_process")
+def elasticsearch_movie_process(
+        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+):
+    print(
+        f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
+    )
+
+    ElasticsearchJob(size, attempts, document_id).process()
+
+    print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
+
+
+@shared_task(bind=True, name="elasticsearch_movie_process_long_task")
+def elasticsearch_movie_process_long_task(
+        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+):
+    print(
+        f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
+    )
+
+    ElasticsearchJob(size, attempts, document_id).process_long_task()
+
+    print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
+
+
+@shared_task(bind=True, name="elasticsearch_movie_process_error")
+def elasticsearch_movie_process_error(
+        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+):
+    print(
+        f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
+    )
+
+    ElasticsearchJob(size, attempts, document_id).process_error()
 
     print(f"{self.__class__.__name__} Memory (After) : {mem_profile.memory_usage()} Mb")
