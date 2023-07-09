@@ -69,6 +69,7 @@ class ActorAdmin(ImportExportModelAdmin):
         "id",
         "name",
         "slug",
+        "imdb_id",
     )
     list_filter = (("created", DateRangeFilter), "status")
     inlines = (ActorImageAdminInline,)
@@ -106,6 +107,7 @@ class ActorImageAdmin(ImportExportModelAdmin):
         "id",
         "thumbnail",
     )
+    raw_id_fields = ["actor"]
     list_display = (
         "id",
         "thumbnail",
@@ -116,7 +118,7 @@ class ActorImageAdmin(ImportExportModelAdmin):
         "attempt",
         "created",
     )
-    search_fields = ("id",)
+    search_fields = ("id", "actor__imdb_id", "actor__id")
     list_filter = (("created", DateRangeFilter), "keyword", "status", "is_valid")
     resource_class = ActorImageResource
     actions = [

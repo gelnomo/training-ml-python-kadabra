@@ -94,7 +94,10 @@ class Faces:
         print(res)
 
     def delete_by_document_id(self, document_id):
-        return self.es.delete(index=self.INDEX, id=document_id)
+        try:
+            return self.es.delete(index=self.INDEX, id=document_id)
+        except Exception as ex:
+            print(ex)
 
     def get_by_document_id(self, document_id):
         return self.es.get(index=self.INDEX, id=document_id)
@@ -288,34 +291,20 @@ class Movies:
         if actors:
             celebrities = [
                 {
-                    "match_phrase": {
-                        "celebrities.id": item["id"]
+                    "nested": {
+                        "path": "celebrities",
+                        "query": {
+                            "match_phrase": {
+                                "celebrities.id": item["id"]
+                            }
+                        }
                     }
                 }
                 for item in actors
             ]
             query = {
-                "function_score": {
-                    "query": {
-                        "match_all": {}
-                    },
-                    "functions": [
-                        {
-                            "filter": {
-                                "nested": {
-                                    "path": "celebrities",
-                                    "query": {
-                                        "bool": {
-                                            "should": celebrities
-                                        }
-                                    }
-                                }
-                            },
-                            "script_score": {
-                                "script": "_score + 0.5"
-                            }
-                        }
-                    ]
+                "bool": {
+                    "should": celebrities
                 }
             }
 

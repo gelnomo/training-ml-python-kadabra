@@ -13,10 +13,10 @@ class SearchText:
         for hit in films["hits"]["hits"]:
             movie_name = hit["_source"]["title"]
             movie_year = hit["_source"]["year"]
-            actors = f"\nCelebrities: \t<b>{ ','.join([item['name'] for item in self.actors])}</b>" if self.actors else ""
+            actors = f"Identified Celebrities: \t<b>{ ', '.join([item['name'] for item in self.actors])}</b>\n\n" if self.actors else ""
             movie_description = hit["_source"]["description"][:100]
             movie_url = f"https://www.imdb.com/title/{hit['_source']['imdb_id']}"
-            text = f"Movie:\n\t<b>{movie_name}</b>{actors}" \
+            text = f"{actors}Movie:\n\t<b>{movie_name}</b>" \
                    f"\nReleased:\n\t{movie_year}\n" \
                    f"\nSynopsis Sample:\n\t{movie_description}..." \
                    f"\nLink:\n\t<a href='{movie_url}'>IMDb</a>"

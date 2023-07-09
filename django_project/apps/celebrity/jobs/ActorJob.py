@@ -46,8 +46,8 @@ class ActorJob(InterfaceJob):
             pass
 
         downloaded = self.__image_from_imdb(actor, 1)
-        if not downloaded:
-            self.__image_from_google(actor, search)
+        # if not downloaded:
+        #     self.__image_from_google(actor, search)
 
     def __identify_image(self, url):
         url = re.sub("V1_.+\.jpg", "V1_FMjpg_UX710_.jpg", url)

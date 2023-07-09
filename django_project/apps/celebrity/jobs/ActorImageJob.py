@@ -29,7 +29,12 @@ class ActorImageJob(InterfaceJob):
         response = urllib.request.urlopen(req, None, 15)
 
         if response.status == 200:
-            path = f"{settings.STATIC_ROOT}/images/celebrities/{obj_actor_image.actor.name.strip()}/{obj_actor_image.keyword.replace(' ', '')}/{str(obj_actor_image.id)}.jpg"
+            path = f"{settings.STATIC_ROOT}/images/celebrities/{obj_actor_image.actor.name.strip()}/{obj_actor_image.keyword.strip().replace(' ', '')}"
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+            path = f"{path}/{str(obj_actor_image.id)}.jpg"
+
             output_file = open(path, "wb")
             data = response.read()
             output_file.write(data)
