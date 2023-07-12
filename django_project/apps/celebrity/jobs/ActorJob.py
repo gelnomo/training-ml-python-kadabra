@@ -34,8 +34,6 @@ class ActorJob(InterfaceJob):
         return is_completed
 
     def __get_massive_images(self, actor: JOB_MODEL):
-        search = actor.name.strip().replace(" ", "%20")
-
         try:
             os.makedirs(
                 f"{settings.STATIC_ROOT}/images/celebrities/{actor.name.strip()}/IMDB"
@@ -47,6 +45,7 @@ class ActorJob(InterfaceJob):
 
         downloaded = self.__image_from_imdb(actor, 1)
         # if not downloaded:
+        # search = actor.name.strip().replace(" ", "%20")
         #     self.__image_from_google(actor, search)
 
     def __identify_image(self, url):

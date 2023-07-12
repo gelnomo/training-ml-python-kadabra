@@ -16,6 +16,8 @@ SITE_ROOT = os.path.abspath(os.path.dirname(__name__))
 SECRET_KEY = env("SECRET_KEY", default="")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Application definition
 

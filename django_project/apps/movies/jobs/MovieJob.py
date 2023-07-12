@@ -519,10 +519,8 @@ class MovieJob(InterfaceJob):
                 )
                 if detail.find_all("div", "ipc-html-content-inner-div")
             ]
-            if not items:
-                return
-
-            obj_movie.description += f"\n{items[0].text}"
+            if items:
+                obj_movie.description += f"\n{items[0].text}"
             obj_movie.save()
 
             ElasticSearchMovie.objects.update_or_create(
