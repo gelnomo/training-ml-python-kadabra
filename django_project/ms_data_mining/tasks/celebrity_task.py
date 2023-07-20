@@ -9,12 +9,12 @@ task_schedule = {
     "actor_process_long_task": {
         "task": "actor_process_long_task",
         "schedule": crontab(minute=0, hour=1),
-        "enabled": True,
+        "enabled": False,
     },
     "actor_process_error": {
         "task": "actor_process_error",
         "schedule": crontab(hour="*", minute=1),
-        "enabled": True,
+        "enabled": False,
     },
     "actor_image_process": {
         "task": "actor_image_process",
@@ -24,12 +24,12 @@ task_schedule = {
     "actor_image_process_long_task": {
         "task": "actor_image_process_long_task",
         "schedule": crontab(minute=0, hour=1),
-        "enabled": True,
+        "enabled": False,
     },
     "actor_image_process_error": {
         "task": "actor_image_process_error",
         "schedule": crontab(hour="*", minute=1),
-        "enabled": True,
+        "enabled": False,
     },
     "elasticsearch_actor_images_process": {
         "task": "elasticsearch_actor_images_process",
@@ -39,11 +39,11 @@ task_schedule = {
     "elasticsearch_actor_images_process_long_task": {
         "task": "elasticsearch_actor_images_process_long_task",
         "schedule": crontab(minute=0, hour=1),
-        "enabled": True,
+        "enabled": False,
     },
     "elasticsearch_actor_images_process_error": {
         "task": "elasticsearch_actor_images_process_error",
         "schedule": crontab(hour="*", minute=1),
-        "enabled": True,
+        "enabled": False,
     },
 }

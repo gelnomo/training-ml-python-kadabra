@@ -19,7 +19,7 @@ def movie_process(self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_i
 
 @shared_task(bind=True, name="movie_process_long_task")
 def movie_process_long_task(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
+        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -32,7 +32,7 @@ def movie_process_long_task(
 
 @shared_task(bind=True, name="movie_process_error")
 def movie_process_error(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
+        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, movie_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -58,7 +58,7 @@ def elasticsearch_movie_process(
 
 @shared_task(bind=True, name="elasticsearch_movie_process_long_task")
 def elasticsearch_movie_process_long_task(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"
@@ -71,7 +71,7 @@ def elasticsearch_movie_process_long_task(
 
 @shared_task(bind=True, name="elasticsearch_movie_process_error")
 def elasticsearch_movie_process_error(
-        self, size=0, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
+        self, size=100, attempts=config.CONFIG_ACTOR_ATTEMPTS, document_id=None
 ):
     print(
         f"{self.__class__.__name__} Memory (Before) : {mem_profile.memory_usage()} Mb"

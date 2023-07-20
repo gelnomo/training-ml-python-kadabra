@@ -33,6 +33,8 @@ INSTALLED_APPS = [
     "django.forms",
     "django_json_widget",
     "image_uploader_widget",
+    "django_celery_results",
+    "django_celery_beat",
     "tinymce",
     "constance",
     "rangefilter",
