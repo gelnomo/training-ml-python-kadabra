@@ -270,7 +270,7 @@ class Movies:
     def check_by_document_id(self, document_id):
         return self.es.exists(index=self.INDEX, id=document_id)
 
-    def query_movie(self, description, actors):
+    def query_movie(self, description, actors, k=3):
         self.__check_index()
         query = None
         script_query_knn = None
@@ -284,7 +284,7 @@ class Movies:
             script_query_knn = {
                 "field": "description_vector",
                 "query_vector": vector,
-                "k": 1,
+                "k": k,
                 "num_candidates": 100
             }
 

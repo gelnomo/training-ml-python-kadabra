@@ -1,10 +1,11 @@
 import face_recognition
 import numpy as np
 from apps.document.schema import Faces
+from constance import config
 
 
 class SearchImage:
-    def __init__(self, image, threshold=0.93):
+    def __init__(self, image, threshold=config.THRESHOLD_IMAGE):
         self.image = image
         self.threshold = threshold
 

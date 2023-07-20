@@ -199,6 +199,9 @@ CONSTANCE_CONFIG = {
     "CONFIG_IMAGE_ATTEMPTS": (3, "Image max attempts", int),
     "TASK_TIME_TYPE": ("minutes", "select time type", "time_type_enum"),
     "TASK_TIME_VALUE": (5, "Integer number", int),
+    "K_TEXT": (3, "Number of movies related to show", int),
+    "THRESHOLD_TEXT": (0.30, "Threshold text", float),
+    "THRESHOLD_IMAGE": (0.93, "Threshold image", float)
 }
 
 CONSTANCE_CONFIG_FIELDSETS = {
@@ -206,7 +209,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
         "CONFIG_ADMIN_LIMIT",
         "CONFIG_ADMIN_LISTING_IMAGE_HEIGHT",
     ),
-    "Actor - Options": ("CONFIG_ACTOR_ATTEMPTS",),
+    "Actor - Options": ("CONFIG_ACTOR_ATTEMPTS", "K_TEXT", "THRESHOLD_TEXT", "THRESHOLD_IMAGE"),
     "Image - Options": ("CONFIG_IMAGE_ATTEMPTS",),
     "Request Task Cache - Options": (
         "TASK_TIME_TYPE",

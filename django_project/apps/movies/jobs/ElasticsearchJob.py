@@ -15,12 +15,16 @@ class ElasticsearchJob(InterfaceJob):
         celebrities = [{"id": str(item.actor.id), "name": item.actor.name.strip()} for item in
                        obj_elasticsearch.movie.movieactor_set.all()]
 
+        description = f"{obj_elasticsearch.movie.description}." \
+                      f"{obj_elasticsearch.movie.name}." \
+                      f"{obj_elasticsearch.movie.director_name}"
+
         data_dict = {
             "id": str(obj_elasticsearch.id),
             "title": obj_elasticsearch.movie.name,
             "year": str(obj_elasticsearch.movie.year),
             "imdb_id": str(obj_elasticsearch.movie.imdb_id),
-            "description": obj_elasticsearch.movie.description,
+            "description": description,
             "celebrities": celebrities
         }
 
