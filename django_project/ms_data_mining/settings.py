@@ -203,7 +203,8 @@ CONSTANCE_CONFIG = {
     "TASK_TIME_VALUE": (5, "Integer number", int),
     "K_TEXT": (3, "Number of movies related to show", int),
     "THRESHOLD_TEXT": (0.30, "Threshold text", float),
-    "THRESHOLD_IMAGE": (0.93, "Threshold image", float)
+    "THRESHOLD_IMAGE": (0.93, "Threshold image", float),
+    "THRESHOLD_YEAR": (10, "Threshold image", int)
 }
 
 CONSTANCE_CONFIG_FIELDSETS = {
@@ -211,7 +212,7 @@ CONSTANCE_CONFIG_FIELDSETS = {
         "CONFIG_ADMIN_LIMIT",
         "CONFIG_ADMIN_LISTING_IMAGE_HEIGHT",
     ),
-    "Actor - Options": ("CONFIG_ACTOR_ATTEMPTS", "K_TEXT", "THRESHOLD_TEXT", "THRESHOLD_IMAGE"),
+    "Actor - Options": ("CONFIG_ACTOR_ATTEMPTS", "K_TEXT", "THRESHOLD_TEXT", "THRESHOLD_IMAGE", "THRESHOLD_YEAR"),
     "Image - Options": ("CONFIG_IMAGE_ATTEMPTS",),
     "Request Task Cache - Options": (
         "TASK_TIME_TYPE",

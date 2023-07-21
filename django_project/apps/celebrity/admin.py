@@ -167,7 +167,7 @@ class ElasticSearchActorImageAdmin(ImportExportModelAdmin):
         "created",
         "updated",
     )
-    search_fields = ("id",)
+    search_fields = ("id", "actor_image__actor__id")
     list_filter = (("created", DateRangeFilter), "status")
     actions = [
         "process",

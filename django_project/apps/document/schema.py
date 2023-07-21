@@ -3,7 +3,7 @@ from elasticsearch import Elasticsearch
 from django.conf import settings
 from elasticsearch import helpers
 import tensorflow as tf
-
+from constance import config
 from apps.botAI.load_model import LoadModel
 
 
@@ -33,6 +33,9 @@ class Faces:
                     "image_id": {"type": "keyword"},
                     "actor_id": {"type": "keyword"},
                     "name": {"type": "keyword"},
+                    "age": {"type": "integer"},
+                    "birthday": {"type": "date"},
+                    "year": {"type": "integer"}
                 }
             },
             "settings": {
@@ -57,6 +60,9 @@ class Faces:
             "image_id": row["image_id"],
             "actor_id": row["actor_id"],
             "face_encoding": row["face_encoding"],
+            "age": row["age"],
+            "birthday": row["birthday"],
+            "year": row["year"]
         }
 
         result = self.es.update(index=self.INDEX, id=row["id"], body={"doc": data_dict})
@@ -70,6 +76,9 @@ class Faces:
             "image_id": row["image_id"],
             "actor_id": row["actor_id"],
             "face_encoding": row["face_encoding"],
+            "age": row["age"],
+            "birthday": row["birthday"],
+            "year": row["year"]
         }
         result = self.es.index(index=self.INDEX, id=row["id"], document=data_dict)
         print(result)
@@ -85,6 +94,9 @@ class Faces:
                 "image_id": row["image_id"],
                 "actor_id": row["actor_id"],
                 "face_encoding": row["face_encoding"],
+                "age": row["age"],
+                "birthday": row["birthday"],
+                "year": row["year"]
             }
             op_dict = {"index": {"_index": self.INDEX, "_id": row["id"]}}
             bulk_data.append(op_dict)
@@ -131,7 +143,7 @@ class Faces:
                 index=self.INDEX,
                 query=query,
                 size=size,
-                _source=["name", "image_id", "actor_id"],
+                _source=["name", "image_id", "actor_id", "age", "birthday", "year"],
             )
             result.append(resp)
         return result
@@ -166,7 +178,7 @@ class Movies:
                     "type": "text"
                 },
                 "year": {
-                    "type": "text"
+                    "type": "integer"
                 },
                 "celebrities": {
                     "type": "nested",
@@ -287,10 +299,12 @@ class Movies:
                 "k": k,
                 "num_candidates": 100
             }
-
+        threshold_year = config.THRESHOLD_YEAR
         if actors:
-            celebrities = [
-                {
+            celebrities = []
+
+            for item in actors:
+                celebrities.append({
                     "nested": {
                         "path": "celebrities",
                         "query": {
@@ -299,9 +313,19 @@ class Movies:
                             }
                         }
                     }
-                }
-                for item in actors
-            ]
+                })
+                if item["year"] and item["year"] != "null":
+                    celebrities += [
+                        {
+                            "range": {
+                                "year": {
+                                    "gte": int(item["year"]) - threshold_year,
+                                    "lte": int(item["year"]) + threshold_year
+                                }
+                            }
+                        }
+                    ]
+
             query = {
                 "bool": {
                     "should": celebrities
@@ -312,6 +336,7 @@ class Movies:
             index=self.INDEX,
             knn=script_query_knn,
             query=query,
+            size=k,
             _source={"includes": ["title", "description", "year", "imdb_id"]}
         )
         return response

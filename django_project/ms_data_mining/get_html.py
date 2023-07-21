@@ -14,4 +14,4 @@ def download_page(url: str) -> object:
         return BeautifulSoup(resp_data, "html.parser")
     except Exception as e:
         print(str(e))
-        return BeautifulSoup(None, "html.parser")
+        return None

@@ -25,5 +25,9 @@ class SearchImage:
                 if float(hit["_score"]) > self.threshold:
                     res = next((sub for sub in celebrities_names if sub['id'] == hit["_source"]["actor_id"]), None)
                     if not res:
-                        celebrities_names.append({"name": hit["_source"]["name"].strip(), "id": hit["_source"]["actor_id"]})
+                        celebrities_names.append({"name": hit["_source"]["name"].strip(),
+                                                  "id": hit["_source"]["actor_id"],
+                                                  "age": hit["_source"]["age"],
+                                                  "birthday": hit["_source"]["birthday"],
+                                                  "year": hit["_source"]["year"]})
         return celebrities_names

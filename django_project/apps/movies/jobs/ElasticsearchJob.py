@@ -22,7 +22,7 @@ class ElasticsearchJob(InterfaceJob):
         data_dict = {
             "id": str(obj_elasticsearch.id),
             "title": obj_elasticsearch.movie.name,
-            "year": str(obj_elasticsearch.movie.year),
+            "year": int(obj_elasticsearch.movie.year) if obj_elasticsearch.movie.year.isnumeric() else 0,
             "imdb_id": str(obj_elasticsearch.movie.imdb_id),
             "description": description,
             "celebrities": celebrities

@@ -29,8 +29,8 @@ class ActorJob(InterfaceJob):
     def internal_process(self, item_id: str) -> bool:
         is_completed = True
         obj_actor = self.JOB_MODEL.objects.get(id=item_id)
-        self.__get_massive_images(obj_actor)
         self.__get_complementary_information(obj_actor)
+        self.__get_massive_images(obj_actor)
         return is_completed
 
     def __get_massive_images(self, actor: JOB_MODEL):
@@ -154,10 +154,20 @@ class ActorJob(InterfaceJob):
         return [content["src"] for content in page.find_all("img", class_="yWs4tf")]
 
     @staticmethod
-    def __get_complementary_information(obj_actor):
+    def has_numbers(content):
+        return bool(re.search(r'\d', content))
+
+    @staticmethod
+    def is_died_date(context):
+        return bool(re.search(r'[\(|\)]', context))
+
+    def __get_complementary_information(self, obj_actor):
         try:
-            url = f"https://www.imdb.com/name/{obj_actor.imdb_id.replace(' ', '%20')}"
+            url = f"https://www.imdb.com/name/{obj_actor.imdb_id.replace(' ', '%20')}/"
             raw_html = download_page(url)
+            if not raw_html:
+                return
+
             time.sleep(random.randint(1, 4))
             items = list(
                 set(
@@ -166,7 +176,7 @@ class ActorJob(InterfaceJob):
                         for content in raw_html.find_all(
                             "span", class_="sc-dec7a8b-2 haviXP"
                         )
-                        if content.text != "Born"
+                        if self.has_numbers(content.text) and not self.is_died_date(content.text)
                     ]
                 )
             )
@@ -174,5 +184,6 @@ class ActorJob(InterfaceJob):
             for item in items:
                 obj_actor.birthday = item
                 obj_actor.save()
+                break
         except Exception as ex:
             print(ex)

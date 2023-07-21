@@ -101,7 +101,10 @@ class SearchText:
 
     def process(self):
         movies = Movies()
-        message = self.__preprocessor_remove_special_chars(self.message)
+        message = self.message
+        if message:
+            message = self.__preprocessor_remove_special_chars(self.message)
+
         films = movies.query_movie(message, self.actors, k=config.K_TEXT)
         result = [
             f"Identified Celebrities: \t<b>{', '.join([item['name'] for item in self.actors])}</b>\n" if self.actors else ""]
