@@ -1,5 +1,6 @@
 import io
 from time import sleep
+from constance import config
 from django.http import HttpResponse
 import requests
 import telegram
@@ -7,7 +8,14 @@ from PIL import Image
 from django.conf import settings
 import json
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from apps.document.schema import Movies
+from ms_data_mining.redis_tools import Utils as rd, TimeTypeEnum
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 
 from apps.botAI.search_image import SearchImage
 from apps.botAI.search_text import SearchText
@@ -21,7 +29,8 @@ class TelegramBot:
     @staticmethod
     async def cancel(update, user):
         await update.message.reply_text(
-            f"Bye {user.first_name}! I hope we can talk again some day.", reply_markup=ReplyKeyboardRemove()
+            f"Bye {user.first_name}! I hope we can talk again some day.",
+            reply_markup=ReplyKeyboardRemove(),
         )
 
     @staticmethod
@@ -36,7 +45,7 @@ To begin, you can send me a <b>PHOTO</b> of the movie or provide a <b>TEXT</b> s
 
 Let's get started on our movie-finding adventure! 🎬✨        
 """
-        await update.message.reply_text(bot_welcome, parse_mode='HTML')
+        await update.message.reply_text(bot_welcome, parse_mode="HTML")
 
         # option_buttons = [
         #     [InlineKeyboardButton("YES", callback_data="model_nlp_k")],
@@ -48,10 +57,29 @@ Let's get started on our movie-finding adventure! 🎬✨
         # await update.message.reply_text("[Optional] Select a Model:", reply_markup=reply_markup)
 
     @staticmethod
+    async def movie_listing(update, user):
+        hash_key = rd.get_unique_name("movie", f"list.{user}")
+        payload = rd().get_data(hash_key)
+        if payload is None:
+            time_type = TimeTypeEnum(config.MOVIE_LIST_TIME_TYPE)
+            time_value = config.MOVIE_LIST_TIME_VALUE
+
+            movies = Movies()
+            payload = movies.query_movie_listing()
+            _movie_listing = []
+            for item, hit in enumerate(payload["hits"]["hits"]):
+                _movie_listing.append(f'<b>{item + 1}</b>. {hit["_source"]["title"]} ({hit["_source"]["year"]})')
+            payload = f"🎥 <b>TOP {config.SIZE_MOVIE_LISTING} - MOVIE LIST:</b>\n\n"
+            payload += "\n".join(_movie_listing)
+            rd().set_data(hash_key, payload, time_type, time_value)
+
+        await update.message.reply_text(payload, parse_mode="HTML")
+
+    @staticmethod
     async def callbacks(query):
         selected_option = query.data
-        if selected_option == 'model_nlp_k':
-            await query.message.reply_text('You selected NLP Model K!')
+        if selected_option == "model_nlp_k":
+            await query.message.reply_text("You selected NLP Model K!")
 
     async def is_command(self, message, update, user):
         if not message:
@@ -62,6 +90,9 @@ Let's get started on our movie-finding adventure! 🎬✨
             return True
         elif message == "/cancel":
             await self.cancel(update, user)
+            return True
+        elif message == "/list":
+            await self.movie_listing(update, user)
             return True
 
         return False
@@ -100,7 +131,8 @@ Let's get started on our movie-finding adventure! 🎬✨
     async def conversation(update, message, user):
         celebrities = None
         await update.message.reply_text(
-            f"Thank you {user.first_name.capitalize()}!\nI am taking a look at my movie collection, hold on....")
+            f"Thank you {user.first_name.capitalize()}!\nI am taking a look at my movie collection, hold on...."
+        )
         await update.message.reply_chat_action(action="typing")
 
         if update.message.photo:
@@ -110,16 +142,19 @@ Let's get started on our movie-finding adventure! 🎬✨
 
         if not message and not celebrities:
             await update.message.reply_text(
-                f"Sorry {user.first_name.capitalize()}, I need to describe a movie with text or photo")
+                f"Sorry {user.first_name.capitalize()}, I need to describe a movie with text or photo"
+            )
             return
 
         movie = SearchText(message, celebrities).process()
 
         if movie:
-            await update.message.reply_text(movie, parse_mode='HTML')
+            await update.message.reply_text(movie, parse_mode="HTML")
         else:
-            replay_message = f"Sorry!. There is not enough information about the movie you describe."
-            await update.message.reply_text(text=replay_message, parse_mode='HTML')
+            replay_message = (
+                f"Sorry!. There is not enough information about the movie you describe."
+            )
+            await update.message.reply_text(text=replay_message, parse_mode="HTML")
 
     @staticmethod
     def subscribe():

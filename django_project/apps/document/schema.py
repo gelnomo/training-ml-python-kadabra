@@ -35,7 +35,7 @@ class Faces:
                     "name": {"type": "keyword"},
                     "age": {"type": "integer"},
                     "birthday": {"type": "date"},
-                    "year": {"type": "integer"}
+                    "year": {"type": "integer"},
                 }
             },
             "settings": {
@@ -62,7 +62,7 @@ class Faces:
             "face_encoding": row["face_encoding"],
             "age": row["age"],
             "birthday": row["birthday"],
-            "year": row["year"]
+            "year": row["year"],
         }
 
         result = self.es.update(index=self.INDEX, id=row["id"], body={"doc": data_dict})
@@ -78,7 +78,7 @@ class Faces:
             "face_encoding": row["face_encoding"],
             "age": row["age"],
             "birthday": row["birthday"],
-            "year": row["year"]
+            "year": row["year"],
         }
         result = self.es.index(index=self.INDEX, id=row["id"], document=data_dict)
         print(result)
@@ -96,7 +96,7 @@ class Faces:
                 "face_encoding": row["face_encoding"],
                 "age": row["age"],
                 "birthday": row["birthday"],
-                "year": row["year"]
+                "year": row["year"],
             }
             op_dict = {"index": {"_index": self.INDEX, "_id": row["id"]}}
             bulk_data.append(op_dict)
@@ -170,40 +170,23 @@ class Movies:
 
         _mappings = {
             "dynamic": "true",
-            "_source": {
-                "enabled": "true"
-            },
+            "_source": {"enabled": "true"},
             "properties": {
-                "title": {
-                    "type": "text"
-                },
-                "year": {
-                    "type": "integer"
-                },
+                "title": {"type": "keyword"},
+                "year": {"type": "integer"},
                 "celebrities": {
                     "type": "nested",
-                    "properties": {
-                        "id": {
-                            "type": "keyword"
-                        },
-                        "name": {
-                            "type": "text"
-                        }
-                    }
+                    "properties": {"id": {"type": "keyword"}, "name": {"type": "text"}},
                 },
-                "imdb_id": {
-                    "type": "text"
-                },
-                "description": {
-                    "type": "text"
-                },
+                "imdb_id": {"type": "text"},
+                "description": {"type": "text"},
                 "description_vector": {
                     "type": "dense_vector",
                     "dims": 512,
                     "index": "true",
-                    "similarity": "l2_norm"
-                }
-            }
+                    "similarity": "l2_norm",
+                },
+            },
         }
 
         print(f"creating '{self.INDEX}' index...")
@@ -265,7 +248,7 @@ class Movies:
                 "imdb_id": row["imdb_id"],
                 "description": row["description"],
                 "celebrities": row["celebrities"],
-                "description_vector": vector
+                "description_vector": vector,
             }
 
     def insert_many(self, data):
@@ -297,46 +280,52 @@ class Movies:
                 "field": "description_vector",
                 "query_vector": vector,
                 "k": k,
-                "num_candidates": 100
+                "num_candidates": 100,
             }
         threshold_year = config.THRESHOLD_YEAR
         if actors:
             celebrities = []
 
             for item in actors:
-                celebrities.append({
-                    "nested": {
-                        "path": "celebrities",
-                        "query": {
-                            "match_phrase": {
-                                "celebrities.id": item["id"]
-                            }
+                celebrities.append(
+                    {
+                        "nested": {
+                            "path": "celebrities",
+                            "query": {"match_phrase": {"celebrities.id": item["id"]}},
                         }
                     }
-                })
+                )
                 if item["year"] and item["year"] != "null":
                     celebrities += [
                         {
                             "range": {
                                 "year": {
                                     "gte": int(item["year"]) - threshold_year,
-                                    "lte": int(item["year"]) + threshold_year
+                                    "lte": int(item["year"]) + threshold_year,
                                 }
                             }
                         }
                     ]
 
-            query = {
-                "bool": {
-                    "should": celebrities
-                }
-            }
+            query = {"bool": {"should": celebrities}}
 
         response = self.es.search(
             index=self.INDEX,
             knn=script_query_knn,
             query=query,
             size=k,
-            _source={"includes": ["title", "description", "year", "imdb_id"]}
+            _source={"includes": ["title", "description", "year", "imdb_id"]},
+        )
+        return response
+
+    def query_movie_listing(self, size=config.SIZE_MOVIE_LISTING):
+        query = {"match_all": {}}
+        sort = [{"title": {"order": "asc"}}]
+        response = self.es.search(
+            index=self.INDEX,
+            query=query,
+            size=size,
+            sort=sort,
+            _source={"includes": ["title", "year", "imdb_id"]},
         )
         return response

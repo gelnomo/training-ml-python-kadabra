@@ -67,7 +67,7 @@ class SearchText:
 
         """
         text = self.__reduce_lengthening(text)
-        text = str(TextBlob(text).correct())
+        # text = str(TextBlob(text).correct())
 
         return text
 
@@ -82,6 +82,7 @@ class SearchText:
             str: Preprocessed text.
 
         """
+
         text = text.lower().strip()
         text = re.sub(r"[^\w\s]|[0-9]", " ", text)
         text = re.sub(r"[!@#~`%^&*(){};:/<>?\|_]", " ", text)

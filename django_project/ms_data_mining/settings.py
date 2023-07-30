@@ -201,10 +201,13 @@ CONSTANCE_CONFIG = {
     "CONFIG_IMAGE_ATTEMPTS": (3, "Image max attempts", int),
     "TASK_TIME_TYPE": ("minutes", "select time type", "time_type_enum"),
     "TASK_TIME_VALUE": (5, "Integer number", int),
+    "MOVIE_LIST_TIME_TYPE": ("days", "select time type", "time_type_enum"),
+    "MOVIE_LIST_TIME_VALUE": (30, "Integer number", int),
     "K_TEXT": (3, "Number of movies related to show", int),
     "THRESHOLD_TEXT": (0.30, "Threshold text", float),
     "THRESHOLD_IMAGE": (0.93, "Threshold image", float),
-    "THRESHOLD_YEAR": (10, "Threshold image", int)
+    "THRESHOLD_YEAR": (10, "Threshold image", int),
+    "SIZE_MOVIE_LISTING": (100, "Size movie listing", int)
 }
 
 CONSTANCE_CONFIG_FIELDSETS = {
@@ -217,6 +220,9 @@ CONSTANCE_CONFIG_FIELDSETS = {
     "Request Task Cache - Options": (
         "TASK_TIME_TYPE",
         "TASK_TIME_VALUE",
+        "MOVIE_LIST_TIME_TYPE",
+        "MOVIE_LIST_TIME_VALUE",
+        "SIZE_MOVIE_LISTING"
     ),
 }
 
