@@ -1,6 +1,9 @@
+import logging
 import threading
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 MODEL_URL = "https://tfhub.dev/google/universal-sentence-encoder-large/5"
 
@@ -31,7 +34,7 @@ class LoadModel(object):
                 if LoadModel._embed is None:
                     import tensorflow_hub as hub
 
-                    print("**** Loading Hub KerasLayer ****")
+                    logger.info("Loading TF-Hub model %s", MODEL_URL)
                     LoadModel._embed = hub.KerasLayer(MODEL_URL)
         return LoadModel._embed
 

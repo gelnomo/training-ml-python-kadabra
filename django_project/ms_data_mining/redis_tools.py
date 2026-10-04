@@ -1,9 +1,12 @@
+import logging
 import hashlib
 import json
 from datetime import timedelta
 from django.db import models
 import redis
 from ms_data_mining.settings import REDIS_DB, REDIS_HOST, REDIS_PORT
+
+logger = logging.getLogger(__name__)
 
 
 class TimeTypeEnum(models.TextChoices):
@@ -44,7 +47,7 @@ class Utils:
                 data = json.loads(data)
         except Exception as ex:
             data = None
-            print(ex)
+            logger.warning("Redis error: %s", ex)
 
         return data
 
@@ -53,7 +56,7 @@ class Utils:
             data = json.dumps(value)
             self.r.setex(key, Utils.get_time_delta(time_type, time_data), value=data)
         except Exception as ex:
-            print(ex)
+            logger.warning("Redis error: %s", ex)
 
     def delete_data(self, key):
         self.r.delete(key)

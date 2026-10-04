@@ -10,6 +10,6 @@ class CelebrityConfig(AppConfig):
         import apps.celebrity.signals  # noqa: F401
 
         if getattr(settings, "PRELOAD_NLP_MODEL", False):
-            from apps.botAI.load_model import LoadModel
+            from apps.document.embeddings import get_text_encoder
 
-            LoadModel().get_embed()
+            get_text_encoder().warm_up()

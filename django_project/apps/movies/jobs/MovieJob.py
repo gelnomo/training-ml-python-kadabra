@@ -1,3 +1,4 @@
+import logging
 import datetime
 import random
 
@@ -13,6 +14,8 @@ from django.conf import settings
 import json
 from django.utils.text import slugify
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class MovieJob(InterfaceJob):
@@ -358,7 +361,7 @@ class MovieJob(InterfaceJob):
     def internal_process(self, item_id: str) -> bool:
         is_completed = True
         obj_movie = self.JOB_MODEL.objects.get(id=item_id)
-        print(f"Processing: {obj_movie.name}")
+        logger.info("Processing: %s", obj_movie.name)
         self.__download_movie_info(obj_movie)
         self.__get_credits(obj_movie)
         self.__get_synopsis(obj_movie)
@@ -382,7 +385,7 @@ class MovieJob(InterfaceJob):
                 )
                 MovieActor.objects.get_or_create(movie=obj_movie, actor=obj_actor)
             except Exception as ex:
-                print(ex)
+                logger.warning("Could not create actor %r: %s", value, ex)
 
     @staticmethod
     def __get_info_movie(year, name, obj_movie):
@@ -465,8 +468,8 @@ class MovieJob(InterfaceJob):
             obj_movie.starts_id = ",".join(starts_id)
             obj_movie.starts_name = ",".join(starts_name)
             obj_movie.save()
-        except Exception as ex:
-            print(ex)
+        except Exception:
+            logger.exception("MovieJob step failed for %s", obj_movie.imdb_id)
 
     def __download_movie_info(self, obj_movie):
         year = 0
@@ -505,7 +508,7 @@ class MovieJob(InterfaceJob):
         obj_movie.director_name = payload.get("Director", None)
         obj_movie.starts_name = payload.get("Actors", None)
         obj_movie.description = payload.get("Plot", None)
-        obj_movie.payload = payload.get("payload", None)
+        # keep the full OMDb response (it was overwritten with None before); the poster URL is in it
         obj_movie.url = movie_url
         obj_movie.save()
 
@@ -533,5 +536,5 @@ class MovieJob(InterfaceJob):
                 movie=obj_movie,
                 defaults={"status": StatusEnum.READY, "attempt": 0},
             )
-        except Exception as ex:
-            print(ex)
+        except Exception:
+            logger.exception("MovieJob step failed for %s", obj_movie.imdb_id)

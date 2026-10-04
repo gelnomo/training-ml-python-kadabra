@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "django_admin_inline_paginator",
     "adrf",
     # Apps
+    "apps.document.apps.DocumentConfig",
     "apps.celebrity.apps.CelebrityConfig",
     "apps.movies.apps.MoviesConfig",
 ]
@@ -191,6 +192,17 @@ CONSTANCE_ADDITIONAL_FIELDS = {
             ),
         },
     ],
+    "text_search_mode_enum": [
+        "django.forms.fields.ChoiceField",
+        {
+            "widget": "django.forms.Select",
+            "choices": (
+                ("vector", "Vector (one vector per movie)"),
+                ("hybrid", "Hybrid (vector + BM25 keywords, RRF)"),
+                ("passages", "Passages (several vectors per movie)"),
+            ),
+        },
+    ],
 }
 
 CONSTANCE_CONFIG = {
@@ -203,10 +215,20 @@ CONSTANCE_CONFIG = {
     "MOVIE_LIST_TIME_TYPE": ("days", "select time type", "time_type_enum"),
     "MOVIE_LIST_TIME_VALUE": (30, "Integer number", int),
     "K_TEXT": (3, "Number of movies related to show", int),
-    "THRESHOLD_TEXT": (0.30, "Threshold text", float),
-    "THRESHOLD_IMAGE": (0.93, "Threshold image", float),
-    "THRESHOLD_YEAR": (10, "Threshold image", int),
-    "SIZE_MOVIE_LISTING": (100, "Size movie listing", int)
+    # kNN score for cosine similarity: (1 + cos) / 2. 0.60 means cos >= 0.2.
+    # Provisional: pick the value with `manage.py evaluate_search`.
+    "THRESHOLD_TEXT": (0.60, "Min text kNN score (cosine: (1+cos)/2); tune with evaluate_search", float),
+    # kNN score for l2_norm: 1 / (1 + d^2). 0.735 means distance < 0.6 (face_recognition's tolerance).
+    "THRESHOLD_IMAGE": (0.735, "Min face kNN score (1/(1+d^2)); 0.735 = distance 0.6", float),
+    "THRESHOLD_YEAR": (10, "Year window (+/-) used to boost photo-only results", int),
+    "SIZE_MOVIE_LISTING": (100, "Size movie listing", int),
+    "FACE_KNN_K": (10, "Nearest stored faces retrieved per query face (votes)", int),
+    "FACE_NUM_CANDIDATES": (100, "HNSW candidates explored per face query", int),
+    "FACE_MIN_VOTES": (1, "Min hits above the threshold an actor needs to be recognised", int),
+    "TEXT_SEARCH_MODE": ("vector", "vector | hybrid | passages", "text_search_mode_enum"),
+    "TEXT_PREPROCESS": (True, "Clean the text with NLTK (lemmas, no stop words) before encoding it", bool),
+    "SCENE_SEARCH_ENABLED": (False, "Match photos without faces against movie posters (CLIP)", bool),
+    "THRESHOLD_SCENE": (0.62, "Min poster kNN score (cosine: (1+cos)/2); tune with evaluate_search", float),
 }
 
 CONSTANCE_CONFIG_FIELDSETS = {
@@ -223,6 +245,15 @@ CONSTANCE_CONFIG_FIELDSETS = {
         "MOVIE_LIST_TIME_VALUE",
         "SIZE_MOVIE_LISTING"
     ),
+    "Search - Options": (
+        "FACE_KNN_K",
+        "FACE_NUM_CANDIDATES",
+        "FACE_MIN_VOTES",
+        "TEXT_SEARCH_MODE",
+        "TEXT_PREPROCESS",
+        "SCENE_SEARCH_ENABLED",
+        "THRESHOLD_SCENE",
+    ),
 }
 
 IMDBID_APIKEY = env("IMDBID_APIKEY", default="")
@@ -233,6 +264,18 @@ ELASTICSEARCH_PWD = env("ELASTICSEARCH_PWD", default="")
 ELASTICSEARCH_NUM_SHARDS = env.int("ELASTICSEARCH_NUM_SHARDS", default=1)
 ELASTICSEARCH_NUM_REPLICAS = env.int("ELASTICSEARCH_NUM_REPLICAS", default=1)
 ELASTICSEARCH_VERIFY_CERTS = env.bool("ELASTICSEARCH_VERIFY_CERTS", default=False)
+# "byte" stores text/poster vectors as int8 (4x smaller, cosine indices only).
+ELASTICSEARCH_VECTOR_ELEMENT_TYPE = env("ELASTICSEARCH_VECTOR_ELEMENT_TYPE", default="float")
+# HNSW variant passed as index_options.type, e.g. "int8_hnsw" on Elasticsearch
+# versions that support it (8.8 does not). Empty = Elasticsearch default.
+ELASTICSEARCH_VECTOR_INDEX_TYPE = env("ELASTICSEARCH_VECTOR_INDEX_TYPE", default="")
+
+# Text model for the movie vectors: use-large | minilm | minilm-multilingual
+# (see apps/document/embeddings.py). Changing it requires `rebuild_indices movies --reembed`.
+TEXT_EMBEDDING_MODEL = env("TEXT_EMBEDDING_MODEL", default="use-large")
+# Extra indices written by the movie Elasticsearch job (they load extra models in the worker).
+INDEX_MOVIE_PASSAGES = env.bool("INDEX_MOVIE_PASSAGES", default=False)
+INDEX_MOVIE_POSTERS = env.bool("INDEX_MOVIE_POSTERS", default=False)
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10240
 
 BOT_TOKEN = env("BOT_TOKEN", default="")
@@ -244,3 +287,19 @@ BOT_SECRET_TOKEN = env("BOT_SECRET_TOKEN", default="")
 # Load the sentence encoder when the app starts instead of on the first request.
 # Off by default so migrate / celery beat / shell don't load TensorFlow.
 PRELOAD_NLP_MODEL = env.bool("PRELOAD_NLP_MODEL", default=False)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "default"},
+    },
+    "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
+    "loggers": {
+        # The Elasticsearch client logs every request at INFO.
+        "elastic_transport": {"level": "WARNING"},
+    },
+}

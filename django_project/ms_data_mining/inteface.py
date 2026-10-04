@@ -1,7 +1,11 @@
+import logging
 import uuid
-from django.utils import timezone
+from django.db import transaction
 from django.db.models import F, Q
+from django.utils import timezone
 from apps.celebrity.enums import StatusEnum
+
+logger = logging.getLogger(__name__)
 
 
 class InterfaceJob:
@@ -21,19 +25,7 @@ class InterfaceJob:
         else:
             query = Q(status=StatusEnum.READY) & Q(attempt__lte=self.attempt)
 
-        if self.size == 0:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by(
-                "attempt", "created"
-            )
-        else:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by(
-                "attempt", "created"
-            )[: self.size]
-        self.__collect_ids(lst_prop)
-
-        self.JOB_MODEL.objects.filter(
-            id__in=[item["id"] for item in self.lst_items]
-        ).update(status=StatusEnum.RUNNING, updated=timezone.now())
+        self.__claim(query, ("attempt", "created"), status=StatusEnum.RUNNING)
 
         self.__process_item()
 
@@ -47,8 +39,8 @@ class InterfaceJob:
                         status=StatusEnum.COMPLETED,
                         updated=timezone.now(),
                     )
-            except Exception as ex:
-                print(ex)
+            except Exception:
+                logger.exception("%s %s failed", self.JOB_MODEL.__name__, item["id"])
                 self.JOB_MODEL.objects.filter(id=item["id"]).update(
                     status=StatusEnum.ERROR,
                     updated=timezone.now(),
@@ -56,11 +48,29 @@ class InterfaceJob:
 
             self.update_task(item["id"])
 
-    def __collect_ids(self, queryset):
-        # Only fetch the primary keys: the job models can hold large JSON payloads.
-        self.lst_items.extend(
-            {"id": str(item_id)} for item_id in queryset.values_list("id", flat=True)
-        )
+    def __claim(self, query, order_by, limit=True, **changes):
+        """
+        Select the matching rows and apply ``changes`` to them in one transaction.
+
+        ``select_for_update(skip_locked=True)`` locks the selected rows, and rows
+        already locked by another worker are skipped, so two overlapping Celery runs
+        never pick the same items. Only the primary keys are fetched: the job models
+        can hold large JSON payloads.
+        """
+        with transaction.atomic():
+            queryset = (
+                self.JOB_MODEL.objects.select_for_update(skip_locked=True)
+                .filter(query)
+                .order_by(*order_by)
+            )
+            if limit and self.size:
+                queryset = queryset[: self.size]
+            ids = [str(item_id) for item_id in queryset.values_list("id", flat=True)]
+            if ids:
+                self.JOB_MODEL.objects.filter(id__in=ids).update(
+                    updated=timezone.now(), **changes
+                )
+        self.lst_items.extend({"id": item_id} for item_id in ids)
 
     def internal_process(self, item_id: str) -> bool:
         pass
@@ -76,16 +86,7 @@ class InterfaceJob:
         self.lst_items = []
         query = Q(status=StatusEnum.ERROR) & Q(attempt__gte=self.attempt)
 
-        lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")
-
-        self.__collect_ids(lst_prop)
-
-        self.JOB_MODEL.objects.filter(
-            id__in=[item["id"] for item in self.lst_items]
-        ).update(
-            status=StatusEnum.EXPIRED,
-            updated=timezone.now(),
-        )
+        self.__claim(query, ("created",), limit=False, status=StatusEnum.EXPIRED)
 
     def process_error(self):
         if self.job_id is not None:
@@ -93,21 +94,8 @@ class InterfaceJob:
         else:
             query = Q(status=StatusEnum.ERROR) & Q(attempt__lt=self.attempt)
 
-        if self.size == 0:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")
-        else:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")[
-                : self.size
-            ]
-
-        self.__collect_ids(lst_prop)
-
-        self.JOB_MODEL.objects.filter(
-            id__in=[item["id"] for item in self.lst_items]
-        ).update(
-            status=StatusEnum.READY,
-            attempt=F("attempt") + 1,
-            updated=timezone.now(),
+        self.__claim(
+            query, ("created",), status=StatusEnum.READY, attempt=F("attempt") + 1
         )
 
         self.process_expired()
@@ -121,20 +109,5 @@ class InterfaceJob:
                 updated__lte=(timezone.now() + timezone.timedelta(days=-1))
             )
 
-        if self.size == 0:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")
-        else:
-            lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")[
-                : self.size
-            ]
-
-        self.__collect_ids(lst_prop)
-
-        self.JOB_MODEL.objects.filter(
-            id__in=[item["id"] for item in self.lst_items]
-        ).update(
-            status=StatusEnum.READY,
-            attempt=0,
-            updated=timezone.now(),
-        )
+        self.__claim(query, ("created",), status=StatusEnum.READY, attempt=0)
         self.__updated_item()

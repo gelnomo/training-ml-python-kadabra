@@ -1,8 +1,8 @@
 # How Kadabra finds a movie: the Elasticsearch vector-search architecture
 
-This page explains how the project stores vectors in Elasticsearch (ES), why that makes matching fast, what the current code actually does, and what to improve next.
+This page explains how the project stores vectors in Elasticsearch (ES), why that makes matching fast, and how each part of the search works. It also lists what was verified, and what you still need to measure with your own data.
 
-> **Version caveat:** some Elasticsearch details below depend on the server version. The Python client here is `elasticsearch==8.8.0`, but I don't know which ES server version you run. Items marked *(verify)* should be checked against the docs for your version.
+> **Versions:** everything below was tested against **Elasticsearch 8.8.0** (the version of the Python client in `requirements.txt`). The optional `int8_hnsw` index type does **not** exist in 8.8. See *Compression*.
 
 ---
 
@@ -18,160 +18,161 @@ flowchart LR
   subgraph Offline["Offline: Celery beat + workers"]
     IMDb[(IMDb / OMDb)] --> MJ[MovieJob<br/>scrape movie + cast]
     MJ --> AJ[ActorJob<br/>birthday + image URLs]
-    AJ --> AIJ[ActorImageJob<br/>download, keep 1-face images]
-    AIJ --> FEJ["celebrity/ElasticsearchJob<br/>dlib 128-d face vector<br/>+ DeepFace age → photo year"]
-    MJ --> MEJ["movies/ElasticsearchJob<br/>USE-large 512-d text vector"]
-    FEJ --> FI[("ES index: celebrity")]
-    MEJ --> MI[("ES index: movies_search")]
+    AJ --> AIJ["ActorImageJob<br/>download, keep 1-face images,<br/>save the 128-d encoding"]
+    AIJ --> FEJ["celebrity/ElasticsearchJob<br/>reuse encoding + DeepFace age"]
+    MJ --> MEJ["movies/ElasticsearchJob<br/>text vector (+ passages, + poster)"]
+    FEJ --> FI[("kadabra_faces")]
+    MEJ --> MI[("kadabra_movies")]
+    MEJ -. optional .-> PI[("kadabra_movie_passages")]
+    MEJ -. optional .-> PO[("kadabra_movie_posters")]
   end
-  subgraph Online["Online: Telegram webhook"]
-    U((User)) -->|photo| SI[SearchImage<br/>face → 128-d vector]
-    U -->|text| ST[SearchText<br/>NLTK clean → 512-d vector]
-    SI -->|nearest faces| FI
-    FI -->|actor ids + year| ST
-    ST -->|kNN + actor/year filter| MI
-    MI --> R[Best movie → reply]
+  subgraph Online["Online: Telegram"]
+    U((User)) --> WH["Webhook view<br/>validate + queue, answer 200"]
+    WH --> T["Celery task<br/>telegram_process_update"]
+    T -->|photo| SI["SearchImage<br/>kNN k=10 per face + weighted vote"]
+    SI --> FI
+    T -->|text / actors| ST["SearchText<br/>kNN filtered by actors"]
+    ST --> MI
+    ST -. passages mode .-> PI
+    T -. photo, no face .-> SS["SearchScene (CLIP)"]
+    SS --> PO
   end
 ```
 
 Postgres holds the work queues: `Movie`, `Actor`, `ActorImage`, `ElasticSearchActorImage` and `ElasticSearchMovie`, each with a `status` and an `attempt` count. ES holds only the searchable vectors and the few fields needed to build the reply.
 
-### The two indices today
+### The indices
 
-| Index | Vector field | Model | Dims | ES mapping |
+Every index is reached through an **alias** that points to one timestamped concrete index (`kadabra_faces` → `kadabra_faces_20261004…`). Changing a mapping or a model means building a new index and switching the alias atomically (`manage.py rebuild_indices`), so there is no downtime.
+
+| Alias | One document per | Vector | Model | Similarity |
 |---|---|---|---|---|
-| `celebrity` | `face_encoding` | `face_recognition` (dlib ResNet) | 128 | `dense_vector`, **no `index`, no `similarity`** |
-| `movies_search` | `description_vector` | Universal Sentence Encoder large v5 | 512 | `dense_vector`, `index: true`, `similarity: l2_norm` |
+| `kadabra_faces` | actor image (one face) | 128-d | `face_recognition` (dlib) | `l2_norm` |
+| `kadabra_movies` | movie | 512-d (USE) or 384-d (MiniLM) | `TEXT_EMBEDDING_MODEL` | `cosine` |
+| `kadabra_movie_passages` *(optional)* | ~120-word passage of a synopsis | same as movies | same as movies | `cosine` |
+| `kadabra_movie_posters` *(optional)* | movie poster | 512-d | CLIP ViT-B/32 | `cosine` |
 
-Other fields:
-- **`celebrity`:** `actor_id`, `name`, `age`, `birthday`, `year`. Here `year` is birthday + estimated age, so it approximates the year that photo was taken.
-- **`movies_search`:** `title`, `year`, `imdb_id`, and a nested `celebrities {id, name}`.
+All vector fields use `index: true`, so ES builds an HNSW graph (see 2.2). Movies also store a flat `actor_ids` keyword array, used as a cheap kNN filter.
 
 ---
 
 ## 2. Why storing vectors makes matching fast
 
 ### 2.1 Comparing numbers instead of pictures or words
-A face photo has hundreds of thousands of pixels, but the dlib model reduces it to **128 numbers**. Two photos of the same person produce vectors that sit close together. A synopsis becomes **512 numbers**, and descriptions with similar meaning sit close together even when they share no words.
+A face photo has hundreds of thousands of pixels, but the dlib model reduces it to **128 numbers**. Two photos of the same person produce vectors that sit close together. A synopsis becomes 384–512 numbers, and descriptions with similar meaning sit close together even when they share no words.
 
-The expensive step, running the neural network, happens **once per stored item, offline**. At query time the bot runs the model only on the user's one photo or sentence. Matching is then pure arithmetic between vectors.
+The expensive step, running the neural network, happens **once per stored item, offline**. At query time the bot runs a model only on the user's one photo or sentence.
 
 ### 2.2 Brute force vs. an index (HNSW)
-There are two ways to find the nearest vectors:
+- **Brute force (exact):** compare the query with *every* stored vector. The cost grows linearly with the data. For example, 100,000 face images × 128 dimensions is 12.8 million multiply-adds per face per query. **The previous face search worked this way:** a `script_score` with `cosineSimilarity` over `match_all`, on a field that wasn't indexed.
+- **Approximate nearest neighbour (ANN) with HNSW:** with `index: true`, ES (through Lucene) inserts each vector into a layered "small-world" graph where each vector links to a few close neighbours. A search walks greedily from the top layer down and visits only a small fraction of the vectors. `num_candidates` controls how many candidates are explored: more candidates give better recall but a slower search. The trade-off is approximate results, more memory, and slower indexing.
 
-- **Brute force (exact):** compare the query with *every* stored vector. The cost grows linearly with the data. For example, 100,000 face images × 128 dimensions is 12.8 million multiply-adds per face per query, and the cost keeps growing as you scrape more actors.
-- **Approximate nearest neighbour (ANN) with HNSW:** when a vector is stored with `index: true`, ES (through Lucene) inserts it into an **HNSW graph**. This is a layered "small-world" network where each vector links to a few close neighbours. A search starts at the top layer, greedily walks towards the query, and drops down layer by layer. It visits only a small fraction of the vectors, so query cost grows roughly logarithmically instead of linearly. The trade-off: results are *approximate*, it uses more memory, and indexing is slower. `num_candidates` controls how many candidates are explored. More candidates give better recall but a slower search.
+The cost of organising the vectors (building the graph) is paid once when a document is written, and each query reuses it.
 
-This is the real speed win from *saving* vectors in ES. The work of organising the vectors, building the graph, is paid once when a document is written, and each query reuses it.
+### 2.3 How similarity becomes an ES score (verified on 8.8)
 
-### 2.3 How similarity becomes an ES score
-For `knn` search, ES turns distance into a score where higher means more similar *(verify for your version)*:
+| `similarity` | score | used for |
+|---|---|---|
+| `l2_norm` | `1 / (1 + distance²)` | faces |
+| `cosine` | `(1 + cos) / 2` | text, posters |
 
-| `similarity` | score |
+`face_recognition` treats two faces as the same person when their Euclidean **distance is below 0.6**. That is a score of `1 / (1 + 0.36) ≈ 0.735`, the default `THRESHOLD_IMAGE`. A text score of 0.60 means cosine ≥ 0.2.
+
+---
+
+## 3. How each search works now
+
+### 3.1 Faces: kNN + weighted vote (`SearchImage`)
+1. `face_recognition` encodes every face in the photo.
+2. **A single `_msearch` call** sends one kNN search per face: `k = FACE_KNN_K` (10) and `num_candidates = FACE_NUM_CANDIDATES` (100).
+3. For each face, the hits above `THRESHOLD_IMAGE` **vote** for their `actor_id`, weighted by score. The actor with the highest summed score wins, and ties go to the most votes. An actor needs at least `FACE_MIN_VOTES` hits.
+
+Why weighted? A plain vote count lets several *distant* faces outvote one near-identical face. The leave-one-out test on a real ES instance showed exactly that before the fix.
+
+### 3.2 Text: kNN with an actor **filter** (`SearchText`)
+| Input | Query |
 |---|---|
-| `l2_norm` | `1 / (1 + distance²)` |
-| `cosine` | `(1 + cos) / 2` |
-| `dot_product` (unit vectors) | `(1 + dot) / 2` |
+| text only | kNN on `description_vector` |
+| text + recognised actors | kNN **with `filter: terms actor_ids`**: only movies with those actors are ranked. If nothing passes the threshold, it falls back to text only (in case the face match was wrong). |
+| actors only (photo) | `bool` filter on `actor_ids`. Score = number of recognised actors in the cast (+0.5 when the year looks right). |
 
-This matters for thresholds; see 3.3.
+The `THRESHOLD_TEXT` cutoff applies **only to vector scores**. The previous code added the vector score and a text-relevance score together before applying the cutoff.
 
----
+`TEXT_SEARCH_MODE` (Constance) chooses the text strategy:
+- **`vector`** (default): one vector per movie.
+- **`hybrid`:** take 5×k vector candidates above the threshold, rank the same candidates with BM25 keywords, and fuse both rankings with **Reciprocal Rank Fusion** (`1/(60+rank)`). This is done in Python, so it works on ES 8.8 with any licence. It helps when the user types exact words such as a character name.
+- **`passages`:** search `kadabra_movie_passages` (overlapping ~120-word windows of each synopsis) and keep the best passage per movie. A short description can then match the part of a long plot it describes.
 
-## 3. What the current code actually does, and its weak points
+### 3.3 Scene search (`SearchScene`, optional)
+When a photo has no recognisable face and no caption, it is encoded with **CLIP** and matched against the CLIP vectors of the movie posters. Enable it with `INDEX_MOVIE_POSTERS=True` (indexing) and the Constance flag `SCENE_SEARCH_ENABLED`.
 
-### 3.1 Face search is brute force (the biggest performance issue)
-`Faces.__create_index` maps `face_encoding` as `{"type": "dense_vector", "dims": 128}` with no `index` or `similarity`, and `Faces.query_face` uses a `function_score` + `script_score` running `cosineSimilarity(...)` over a `match_all`.
+Posters are a weak stand-in for real movie stills. Measure this mode with `evaluate_search` before you rely on it.
 
-That **scans every face document on every query**, so the HNSW graph described in 2.2 is never used for faces. Search time grows with every image the scrapers add. In ES 8.8, `dense_vector` defaults to *not indexed*. I believe newer 8.x versions changed that default, but the script query would still be brute force *(verify)*.
+### 3.4 The bot runs in Celery
+The webhook view does three things:
+- checks the optional `BOT_SECRET_TOKEN`;
+- drops updates Telegram has already sent (Redis `SET NX` on `update_id`, kept 24 h);
+- queues `telegram_process_update`, then answers **200 immediately**.
 
-### 3.2 The face model and the similarity measure don't match
-dlib/`face_recognition` vectors are meant to be compared with **Euclidean distance**. The library's default "same person" tolerance is `0.6`. The code uses cosine similarity with `THRESHOLD_IMAGE = 0.93`, a value that wasn't derived from the model.
+The worker does the face and text work and replies through the Bot API. If the broker is down, the view answers 503 and forgets the `update_id`, so Telegram's retry is processed.
 
-Also, the script score isn't shifted to be non-negative. Cosine can be below 0, and ES rejects negative scores in some scoring contexts *(verify)*.
-
-### 3.3 The text threshold barely filters anything
-`movies_search` uses `l2_norm`, so `score = 1/(1+d²)`. `THRESHOLD_TEXT = 0.30` means `d² ≤ 2.33`. USE embeddings are approximately unit-length *(verify for your data)*, and for unit vectors `d² = 2 − 2·cos`. So the threshold accepts anything with **cosine ≥ about −0.17**, which is almost everything.
-
-In addition, when actors are found, the `knn` score and the `bool` query score are **added together**. The threshold then compares a mix of a vector score and a text-relevance score, which isn't meaningful.
-
-### 3.4 The actor/year filter adds candidates instead of narrowing them
-`Movies.query_movie` builds `bool.should: [nested actor match, year range, …]` next to `knn`. In ES, `knn` and `query` are combined as a **disjunction**, so a movie that matches only the year range (with any actor) can still rank. What's probably intended is "movies **with** this actor, ranked by text similarity", which is a **filter**.
-
-### 3.5 The "year" comes from the wrong photo
-`year` is computed when an IMDb image is indexed (that image's birthday + age). At query time the code uses the year of the *matched stored image*, not of the user's photo. It works only indirectly, because faces of a similar age tend to match each other.
-
-### 3.6 Only one result per face
-`query_face(size=1)` takes only the single nearest image. Each actor has many images, so taking the top *k* and **voting by `actor_id`** is much more robust.
-
-### 3.7 Heavy work inside the async webhook
-`TelegramBot.conversation` runs face encoding, TensorFlow and the synchronous ES client **inside an async view**, which blocks the event loop. If the reply is slow, Telegram retries the webhook, and the same photo may be processed twice.
+### 3.5 Compression
+- `ELASTICSEARCH_VECTOR_ELEMENT_TYPE=byte` stores text and poster vectors as **int8**, 1 byte per dimension instead of 4 (verified on 8.8).
+  - Vectors are normalised and scaled to [-127, 127], and query vectors are quantised the same way.
+  - On the small test set the ranking and the suggested threshold barely changed (0.6349 → 0.6358).
+  - Faces stay float, because `l2_norm` depends on the vector length.
+- `ELASTICSEARCH_VECTOR_INDEX_TYPE` passes an HNSW variant such as `int8_hnsw` for ES versions that support it. **8.8 rejects it.**
 
 ---
 
-## 4. Recommended improvements
+## 4. Measuring quality (`eval/`)
+- `manage.py build_eval_cases` writes a skeleton of 50–100 indexed movies for you to fill in with your own synopses and screenshots. Add negative cases (`expected_imdb_id: null`) for movies that are not in the collection.
+- `manage.py evaluate_search --cases …` reports:
+  - `hit@1`, `hit@3` and MRR per query type;
+  - a **suggested threshold** (the cutoff with the best F1 between correct and wrong top answers);
+  - how many negative cases the current and suggested thresholds reject.
+- `manage.py evaluate_search --faces N` needs no labels. It searches with each indexed face while excluding that face itself (leave-one-out), and reports accuracy and a suggested `THRESHOLD_IMAGE`.
 
-### A. Use real kNN for faces (reindex required)
-```python
-# mapping
-"face_encoding": {"type": "dense_vector", "dims": 128,
-                  "index": True, "similarity": "l2_norm"}
+See `eval/README.md`.
 
-# query: one face
-resp = es.search(
-    index="celebrity",
-    knn={"field": "face_encoding", "query_vector": vec,
-         "k": 10, "num_candidates": 100},
-    _source=["actor_id", "name", "birthday", "year"],
-)
+---
+
+## 5. Operating it
+
+### First deployment of this version
+Old indices (`celebrity`, `movies_search`) are not changed. Copy them once into the new aliases. Pause the Elasticsearch Celery tasks while you do this, because documents written to the old index during a rebuild are not copied.
+
+```bash
+python manage.py migrate                                     # adds ActorImage.face_encoding
+python manage.py rebuild_indices faces  --source celebrity     # same vectors, now with an HNSW index
+python manage.py rebuild_indices movies --source movies_search # adds actor_ids, cosine similarity
+python manage.py evaluate_search --faces 300                   # check THRESHOLD_IMAGE on your data
 ```
-- **Threshold in dlib terms:** `distance < 0.6` ⇔ `score > 1/(1+0.36) ≈ 0.735`, so start with `THRESHOLD_IMAGE ≈ 0.735` and tune it.
-- **Vote:** group the top-10 hits by `actor_id`, keep actors with ≥ 2 hits above the threshold, and rank them by count, then by best score.
-- **Reindexing:** you can't change the mapping of an existing field in place. Create `celebrity_v2`, re-run the indexing jobs (set the `ElasticSearchActorImage` rows back to `READY`), then point the code at the new index. Use an **index alias** so the next migration is a one-line switch.
 
-### B. Make actors a filter, not a should-clause
-```python
-knn = {"field": "description_vector", "query_vector": vec, "k": 3,
-       "num_candidates": 100,
-       "filter": {"nested": {"path": "celebrities",
-                  "query": {"terms": {"celebrities.id": actor_ids}}}}}
+Until those two commands run, the new aliases are empty and the bot finds nothing. A warning is logged when that's the case.
+
+### Changing the text model or the compression
+Set `TEXT_EMBEDDING_MODEL` (`use-large`, `minilm` or `minilm-multilingual`) and/or `ELASTICSEARCH_VECTOR_ELEMENT_TYPE`, then run:
+
+```bash
+python manage.py rebuild_indices movies --reembed
+python manage.py rebuild_indices passages          # if INDEX_MOVIE_PASSAGES=True
 ```
-kNN **with a `filter`** searches only among movies that contain those actors *(verify that nested filters inside `knn` are supported in your version; otherwise store a flat `keyword` array `actor_ids` on each movie and filter with `terms`, which is simpler and faster anyway)*.
 
-When there is **no text** (photo only), skip kNN and use a plain `terms` query on `actor_ids`, ranked by how many of the recognised actors appear in the movie.
+The app refuses to use an index built with a different model, because mixing vectors from two models gives meaningless scores.
 
-### C. Switch text similarity to cosine (or dot_product on normalised vectors), then tune
-Set `similarity: cosine`, or normalise the vectors and use `dot_product`, so that scores map directly to cosine. Then pick `THRESHOLD_TEXT` **from measured data** (see E), not by guessing.
-
-### D. Estimate the age from the user's photo
-At query time, run the same DeepFace age model on the user's face and compute `year = birthday + estimated_age` for the **query** photo. Use it as a soft boost (`should` with a `range`) or a filter, not as an extra candidate source.
-
-### E. Measure before tuning: build a small evaluation set
-Build 50–100 labelled examples: a photo or synopsis plus the correct `imdb_id`. Write a script that reports **top-1 / top-3 hit rate** for image, text and combined search. Every change above (thresholds, k, `num_candidates`, the model) can then be judged with numbers instead of trial and error.
-
-### F. Move bot processing to Celery
-The webhook should only enqueue a task and return `200` immediately. A Celery task then does the face, text and ES work and replies with `bot.send_message`. This removes Telegram retries, duplicate work and blocked event loops.
-
-### G. Other improvements to the local project
-- **Tests:** both `tests.py` files are empty. Start with unit tests for `SearchText`, `SearchImage` vote logic, `MovieJob.__change_chars` and the query builders, using a mocked ES client.
-- **Race condition in the job queue:** `InterfaceJob.process()` selects `READY` rows and *then* marks them `RUNNING`. Two overlapping workers can pick the same rows. Use `select_for_update(skip_locked=True)` inside a transaction.
-- **Logging:** replace `print()` with `logging`, so Celery and Django logs carry level, time and task id.
-- **Encoding faces twice:** `ActorImageJob` computes the face encoding to validate an image, and `ElasticsearchJob` computes it again. Save it once (for example in a JSON field) and reuse it.
-- **Local setup:** a `docker-compose.yml` with Postgres, Redis and Elasticsearch, plus an `.env.example`, would make the project easy to run for new contributors.
-- **Index aliases and versioned mappings:** keep mappings in one place, version the indices (`movies_search_v2`), and switch the alias. Changing a model or dimension then needs no downtime.
-
-### H. Ideas beyond the current scope
-- **Frames without faces:** a CLIP-style image-text model could embed movie stills or posters and match scenes where no actor is recognisable.
-- **Long synopses:** split each synopsis into passages and store several vectors per movie (newer ES versions support nested or multi-vector fields *(verify)*). One average vector for a long plot loses detail.
-- **A smaller or multilingual text model:** `sentence-transformers` is already in `requirements.txt`. A smaller model would be faster, and a multilingual one would accept Spanish synopses, but accuracy has to be checked with the evaluation set from E.
-- **Hybrid ranking:** combine BM25 (exact words such as character names) with kNN using Reciprocal Rank Fusion. Availability and licence depend on your ES version *(verify)*.
-- **Vector quantisation:** newer ES versions can store vectors as int8 or similar, which reduces memory significantly *(verify version and exact savings)*.
+### Optional indices
+```bash
+INDEX_MOVIE_PASSAGES=True  python manage.py rebuild_indices passages
+INDEX_MOVIE_POSTERS=True   python manage.py rebuild_indices posters   # downloads posters (OMDb)
+```
 
 ---
 
-## 5. Suggested order
-
-1. **E**, the evaluation set, so every later change can be measured.
-2. **A**, kNN faces + voting: the biggest speed and accuracy win, and it needs a reindex.
-3. **B + C**, filters and cosine thresholds: fixes ranking, and needs a reindex of `movies_search`.
-4. **F**, bot processing in Celery: improves reliability.
-5. **D**, then the remaining items in **G** and **H**.
+## 6. What still needs your data
+- **Thresholds:**
+  - `THRESHOLD_TEXT = 0.60` and `THRESHOLD_SCENE = 0.62` are **provisional**. Set them from `evaluate_search` on your own cases.
+  - `THRESHOLD_IMAGE = 0.735` comes from `face_recognition`'s documented tolerance. Confirm it with `--faces`.
+- **Constance values already in Redis:** if a key was ever saved in the admin, the stored value wins over the new defaults. Check *Constance → Search options* and *Actor options* after you deploy.
+- **The photo year:** it is still the year of the *matched stored image* (birthday + estimated age), not of the user's photo. Running the age model on the query face would fix this. It was not part of this change.
+- **Model comparisons:** run `evaluate_search` once per setting. Compare `vector`, `hybrid` and `passages`, with and without `--no-preprocess`, and USE vs MiniLM. The NLTK preprocessing (lemmas, no stop words) was designed for the original pipeline and may hurt sentence-embedding models.

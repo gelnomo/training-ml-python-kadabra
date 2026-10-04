@@ -1,26 +1,56 @@
-from apps.document.schema import Movies
-from constance import config
+import logging
+from html import escape
+
 import nltk
 import re
+from constance import config
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
-from html import escape
+
+from apps.document.ranking import rrf_fuse
+from apps.document.schema import Movies, MoviePassages
+
+logger = logging.getLogger(__name__)
+
+# How many vector candidates the hybrid mode re-ranks with BM25.
+HYBRID_CANDIDATES_FACTOR = 5
 
 
 class SearchText:
+    """
+    Find movies from a text synopsis and/or the actors recognised in a photo.
+
+    * text only        -> kNN on the description vectors
+    * text + actors    -> kNN **filtered** to movies with those actors
+                          (falls back to text only if the filter finds nothing)
+    * actors only      -> movies containing the actors, most actors first
+
+    ``TEXT_SEARCH_MODE`` (constance) picks the text strategy:
+    ``vector`` (one vector per movie), ``hybrid`` (vector candidates re-ranked
+    with BM25 keywords through Reciprocal Rank Fusion) or ``passages``
+    (several vectors per movie).
+    """
+
     _stop_words = None
 
-    def __init__(self, message, actors, threshold=None):
+    def __init__(self, message, actors, threshold=None, mode=None, k=None, preprocess=None):
         self.message = message
         self.actors = actors or []
-        # Read the constance value at call time, not at import time, so admin changes apply.
+        # Read the constance values at call time, not at import time, so admin changes apply.
         self.threshold = threshold if threshold is not None else config.THRESHOLD_TEXT
+        self.mode = mode or config.TEXT_SEARCH_MODE
+        self.k = k or config.K_TEXT
+        self.preprocess = preprocess if preprocess is not None else config.TEXT_PREPROCESS
         self.lemmatizer = WordNetLemmatizer()
-        # Load the stop words once per process, as a set for O(1) lookups.
-        if SearchText._stop_words is None:
-            SearchText._stop_words = frozenset(stopwords.words("english"))
+
+    @classmethod
+    def stop_words(cls):
+        # Loaded once per process, as a set for O(1) lookups.
+        if cls._stop_words is None:
+            cls._stop_words = frozenset(stopwords.words("english"))
+        return cls._stop_words
 
     @staticmethod
     def __reduce_lengthening(text: str) -> str:
@@ -99,7 +129,7 @@ class SearchText:
             _word = self.__get_correct_word(word)
             root_word = self.lemmatizer.lemmatize(_word, pos=self.__get_wordnet_pos(tag))
             key = root_word.lower().strip()
-            if key not in self._stop_words and key not in exclude_words:
+            if key not in self.stop_words() and key not in exclude_words:
                 sentences.append(root_word)
 
         # Remove duplicates but keep the original word order (set() order is random).
@@ -107,34 +137,83 @@ class SearchText:
 
         return text
 
-    def process(self):
-        movies = Movies()
-        message = self.message
-        if message:
-            message = self.__preprocessor_remove_special_chars(self.message)
-
-        films = movies.query_movie(message, self.actors, k=config.K_TEXT)
-
-        result = []
-        movie_url = None
-
-        for hit in films["hits"]["hits"]:
-            if hit["_score"] < self.threshold:
-                continue
-            movie_name = escape(str(hit["_source"]["title"]), quote=False)
-            if not movie_url:
-                movie_url = f"\nLink:\n\t<a href='https://www.imdb.com/title/{escape(str(hit['_source']['imdb_id']))}'>{movie_name}</a>"
-            movie_year = hit["_source"]["year"]
-            text = f"Movie:\n\t<b>{movie_name}</b>" \
-                   f"\nReleased:\n\t{movie_year}\n"
-            result.append(text)
-
-        if not result:
-            # Let the bot answer with its "not enough information" message.
+    def clean_text(self):
+        if not self.message:
             return None
+        if not self.preprocess:
+            return self.message.strip() or None
+        return self.__preprocessor_remove_special_chars(self.message) or None
 
-        if self.actors:
-            names = ", ".join(escape(item["name"], quote=False) for item in self.actors)
-            result.insert(0, f"Identified Celebrities: \t<b>{names}</b>\n")
-        result.append(f"Best Result: {movie_url}")
-        return "\n".join(result)
+    @staticmethod
+    def _result(hit):
+        source = hit["_source"]
+        return {
+            "title": source["title"],
+            "year": source.get("year"),
+            "imdb_id": source.get("imdb_id"),
+            "score": hit["_score"],
+            "doc_id": hit["_id"],
+        }
+
+    def _text_hits(self, text, actor_ids, k, threshold):
+        index = MoviePassages() if self.mode == "passages" else Movies()
+        vector = index.encode_one(text)
+        candidates = k * HYBRID_CANDIDATES_FACTOR if self.mode == "hybrid" else k
+
+        hits = []
+        if actor_ids:
+            hits = [h for h in index.knn_search(vector, candidates, actor_ids) if h["_score"] >= threshold]
+            if not hits:
+                logger.info("No text match with actors %s; retrying without the actor filter", actor_ids)
+        if not hits:
+            hits = [h for h in index.knn_search(vector, candidates) if h["_score"] >= threshold]
+
+        if self.mode == "hybrid" and len(hits) > 1:
+            by_id = {hit["_id"]: hit for hit in hits}
+            keyword_rank = Movies().bm25_rank(self.message, list(by_id))
+            hits = [by_id[doc_id] for doc_id in rrf_fuse([list(by_id), keyword_rank]) if doc_id in by_id]
+
+        return hits[:k]
+
+    def search(self, k=None, threshold=None):
+        """Return the ranked results as dicts: title, year, imdb_id, score, doc_id."""
+        k = k or self.k
+        threshold = self.threshold if threshold is None else threshold
+        actor_ids = [item["id"] for item in self.actors]
+        text = self.clean_text()
+
+        if text:
+            hits = self._text_hits(text, actor_ids, k, threshold)
+        elif actor_ids:
+            years = [int(a["year"]) for a in self.actors if str(a.get("year") or "").isdigit()]
+            hits = Movies().search_by_actors(actor_ids, k, years, config.THRESHOLD_YEAR)
+        else:
+            hits = []
+
+        return [self._result(hit) for hit in hits]
+
+    def process(self):
+        return format_results(self.search(), self.actors)
+
+
+def format_results(results, actors=()):
+    """Telegram (HTML) reply for a list of search results, or None."""
+    if not results:
+        # Let the bot answer with its "not enough information" message.
+        return None
+
+    lines = []
+    if actors:
+        names = ", ".join(escape(item["name"], quote=False) for item in actors)
+        lines.append(f"Identified Celebrities: \t<b>{names}</b>\n")
+
+    for result in results:
+        movie_name = escape(str(result["title"]), quote=False)
+        lines.append(f"Movie:\n\t<b>{movie_name}</b>\nReleased:\n\t{result['year']}\n")
+
+    best = results[0]
+    lines.append(
+        f"Best Result: \nLink:\n\t<a href='https://www.imdb.com/title/{escape(str(best['imdb_id']))}'>"
+        f"{escape(str(best['title']), quote=False)}</a>"
+    )
+    return "\n".join(lines)

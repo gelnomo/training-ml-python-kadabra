@@ -1,11 +1,20 @@
 import hmac
+import json
+import logging
 
 from django.conf import settings
 from adrf.decorators import api_view
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.decorators import authentication_classes, permission_classes
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from apps.botAI.bot_core import TelegramBot
+from apps.botAI.bot_core import TelegramBot, forget_update, is_new_update
+from apps.celebrity.tasks import telegram_process_update
+
+logger = logging.getLogger(__name__)
 
 
 def _is_valid_telegram_request(request):
@@ -19,32 +28,50 @@ def _is_valid_telegram_request(request):
     return hmac.compare_digest(token, settings.BOT_SECRET_TOKEN)
 
 
-def _is_staff(request):
-    # JWT user (DRF) or the Django admin session user.
-    user = getattr(request, "user", None)
-    if user is not None and user.is_staff:
-        return True
-    session_user = getattr(getattr(request, "_request", None), "user", None)
-    return bool(session_user is not None and session_user.is_staff)
-
-
 @api_view(["GET", "POST"])
-async def telegram_bot(request):
+def telegram_bot(request):
+    """
+    Telegram webhook: validate, queue the update for a Celery worker and answer
+    200 right away. Telegram resends updates that aren't answered quickly, so the
+    heavy work must not run here.
+    """
     if not _is_valid_telegram_request(request):
         return Response(status=status.HTTP_403_FORBIDDEN)
-    await TelegramBot(request).ask()
+    if not request.body:
+        return Response(status=status.HTTP_200_OK)
+
+    try:
+        content = json.loads(request.body)
+    except ValueError:
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    update_id = content.get("update_id")
+    if is_new_update(update_id):
+        try:
+            telegram_process_update.delay(content)
+        except Exception:
+            # Let Telegram retry: forget the id and answer with an error.
+            forget_update(update_id)
+            logger.exception("Could not queue Telegram update %s", update_id)
+            return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    else:
+        logger.info("Ignoring duplicate Telegram update %s", content.get("update_id"))
     return Response(status=status.HTTP_200_OK)
 
 
+# Webhook management is staff-only: a staff JWT, or a staff user logged in to /admin/.
+STAFF_AUTHENTICATION = [JWTAuthentication, SessionAuthentication]
+
+
 @api_view(["GET"])
+@authentication_classes(STAFF_AUTHENTICATION)
+@permission_classes([IsAdminUser])
 def telegram_subscribe(request):
-    if not _is_staff(request):
-        return Response(status=status.HTTP_403_FORBIDDEN)
-    return TelegramBot(request).subscribe()
+    return TelegramBot.subscribe()
 
 
 @api_view(["GET"])
+@authentication_classes(STAFF_AUTHENTICATION)
+@permission_classes([IsAdminUser])
 def telegram_unsubscribe(request):
-    if not _is_staff(request):
-        return Response(status=status.HTTP_403_FORBIDDEN)
-    return TelegramBot(request).unsubscribe()
+    return TelegramBot.unsubscribe()
