@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import environ
-from apps.botAI.load_model import LoadModel
 
 root = environ.Path(__file__)
 env = environ.Env(
@@ -125,7 +124,7 @@ STATIC_URL = "static/"
 # CORS SECTION
 CORS_ORIGIN_ALLOW_ALL = env.bool("CORS_ORIGIN_ALLOW_ALL", default=True)
 CORS_ORIGIN_WHITELIST = env("CORS_ORIGIN_WHITELIST").split(",")
-CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS").split(",")
+CSRF_TRUSTED_ORIGINS = [o for o in env("CSRF_TRUSTED_ORIGINS", default="").split(",") if o]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -231,14 +230,17 @@ IMDBID_APIKEY = env("IMDBID_APIKEY", default="")
 ELASTICSEARCH_HOST = env("ELASTICSEARCH_HOST", default="")
 ELASTICSEARCH_USER = env("ELASTICSEARCH_USER", default="")
 ELASTICSEARCH_PWD = env("ELASTICSEARCH_PWD", default="")
-ELASTICSEARCH_NUM_SHARDS = env("ELASTICSEARCH_NUM_SHARDS", default=1)
-ELASTICSEARCH_NUM_REPLICAS = env("ELASTICSEARCH_NUM_REPLICAS", default=1)
+ELASTICSEARCH_NUM_SHARDS = env.int("ELASTICSEARCH_NUM_SHARDS", default=1)
+ELASTICSEARCH_NUM_REPLICAS = env.int("ELASTICSEARCH_NUM_REPLICAS", default=1)
 ELASTICSEARCH_VERIFY_CERTS = env.bool("ELASTICSEARCH_VERIFY_CERTS", default=False)
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10240
 
 BOT_TOKEN = env("BOT_TOKEN", default="")
 BOT_USER_NAME = env("BOT_USER_NAME", default="")
 BOT_URL = env("BOT_URL", default="")
+# Optional secret sent by Telegram in the "X-Telegram-Bot-Api-Secret-Token" header.
+BOT_SECRET_TOKEN = env("BOT_SECRET_TOKEN", default="")
 
-# Load model
-LoadModel().get_embed()
+# Load the sentence encoder when the app starts instead of on the first request.
+# Off by default so migrate / celery beat / shell don't load TensorFlow.
+PRELOAD_NLP_MODEL = env.bool("PRELOAD_NLP_MODEL", default=False)

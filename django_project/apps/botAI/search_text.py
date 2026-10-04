@@ -6,16 +6,21 @@ from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
-from textblob import TextBlob
+from html import escape
 
 
 class SearchText:
-    def __init__(self, message, actors, threshold=config.THRESHOLD_TEXT):
+    _stop_words = None
+
+    def __init__(self, message, actors, threshold=None):
         self.message = message
-        self.actors = actors
-        self.threshold = threshold
+        self.actors = actors or []
+        # Read the constance value at call time, not at import time, so admin changes apply.
+        self.threshold = threshold if threshold is not None else config.THRESHOLD_TEXT
         self.lemmatizer = WordNetLemmatizer()
-        self._stop_words = stopwords.words('english')
+        # Load the stop words once per process, as a set for O(1) lookups.
+        if SearchText._stop_words is None:
+            SearchText._stop_words = frozenset(stopwords.words("english"))
 
     @staticmethod
     def __reduce_lengthening(text: str) -> str:
@@ -71,7 +76,7 @@ class SearchText:
 
         return text
 
-    def __preprocessor_remove_special_chars(self, text: str, exclude_words: list = []) -> str:
+    def __preprocessor_remove_special_chars(self, text: str, exclude_words: tuple = ()) -> str:
         """
         Preprocesses the text by removing special characters, numbers, and applying lemmatization or stemming.
 
@@ -90,13 +95,15 @@ class SearchText:
         tokens_pos = nltk.pos_tag(tokens)
         sentences = []
         for word, tag in tokens_pos:
-            _word = self.__reduce_lengthening(word)
-            _word = self.__get_correct_word(_word)
+            # __get_correct_word already reduces lengthening.
+            _word = self.__get_correct_word(word)
             root_word = self.lemmatizer.lemmatize(_word, pos=self.__get_wordnet_pos(tag))
-            if root_word.lower().strip() not in self._stop_words and root_word.lower().strip() not in exclude_words:
+            key = root_word.lower().strip()
+            if key not in self._stop_words and key not in exclude_words:
                 sentences.append(root_word)
 
-        text = " ".join(set(sentences))
+        # Remove duplicates but keep the original word order (set() order is random).
+        text = " ".join(dict.fromkeys(sentences))
 
         return text
 
@@ -107,20 +114,27 @@ class SearchText:
             message = self.__preprocessor_remove_special_chars(self.message)
 
         films = movies.query_movie(message, self.actors, k=config.K_TEXT)
-        result = [
-            f"Identified Celebrities: \t<b>{', '.join([item['name'] for item in self.actors])}</b>\n" if self.actors else ""]
 
+        result = []
         movie_url = None
 
         for hit in films["hits"]["hits"]:
             if hit["_score"] < self.threshold:
                 continue
-            movie_name = hit["_source"]["title"]
+            movie_name = escape(str(hit["_source"]["title"]), quote=False)
             if not movie_url:
-                movie_url = f"\nLink:\n\t<a href='https://www.imdb.com/title/{hit['_source']['imdb_id']}'>{movie_name}</a>"
+                movie_url = f"\nLink:\n\t<a href='https://www.imdb.com/title/{escape(str(hit['_source']['imdb_id']))}'>{movie_name}</a>"
             movie_year = hit["_source"]["year"]
             text = f"Movie:\n\t<b>{movie_name}</b>" \
                    f"\nReleased:\n\t{movie_year}\n"
             result.append(text)
+
+        if not result:
+            # Let the bot answer with its "not enough information" message.
+            return None
+
+        if self.actors:
+            names = ", ".join(escape(item["name"], quote=False) for item in self.actors)
+            result.insert(0, f"Identified Celebrities: \t<b>{names}</b>\n")
         result.append(f"Best Result: {movie_url}")
-        return "\n".join(result) if result else None
+        return "\n".join(result)

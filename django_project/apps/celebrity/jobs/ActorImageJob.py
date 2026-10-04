@@ -26,23 +26,21 @@ class ActorImageJob(InterfaceJob):
             obj_actor_image.url,
             headers={"User-Agent": ua.random},
         )
-        response = urllib.request.urlopen(req, None, 15)
-
-        if response.status == 200:
-            path = f"{settings.STATIC_ROOT}/images/celebrities/{obj_actor_image.actor.name.strip()}/{obj_actor_image.keyword.strip().replace(' ', '')}"
-            if not os.path.exists(path):
-                os.makedirs(path)
-
-            path = f"{path}/{str(obj_actor_image.id)}.jpg"
-
-            output_file = open(path, "wb")
+        with urllib.request.urlopen(req, None, 15) as response:
+            if response.status != 200:
+                return
             data = response.read()
+
+        path = f"{settings.STATIC_ROOT}/images/celebrities/{obj_actor_image.actor.name.strip()}/{obj_actor_image.keyword.strip().replace(' ', '')}"
+        os.makedirs(path, exist_ok=True)
+
+        path = f"{path}/{str(obj_actor_image.id)}.jpg"
+
+        with open(path, "wb") as output_file:
             output_file.write(data)
-            obj_actor_image.path = path
-            obj_actor_image.save()
-            output_file.close()
-            self.__is_valid_face(obj_actor_image)
-        response.close()
+        obj_actor_image.path = path
+        obj_actor_image.save()
+        self.__is_valid_face(obj_actor_image)
 
     @staticmethod
     def __is_valid_face(obj_actor_image):

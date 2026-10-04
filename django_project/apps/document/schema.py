@@ -1,10 +1,11 @@
-import numpy as np
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, NotFoundError
 from django.conf import settings
 from elasticsearch import helpers
-import tensorflow as tf
 from constance import config
 from apps.botAI.load_model import LoadModel
+
+# Number of descriptions sent to the sentence encoder in a single call when bulk indexing.
+EMBED_BATCH_SIZE = 64
 
 
 def elastic_connection():
@@ -52,10 +53,9 @@ class Faces:
         print(f"creating '{self.INDEX}' index...")
         self.es.indices.create(index=self.INDEX, body=index_body)
 
-    def update_one(self, row):
-        self.__check_index()
-
-        data_dict = {
+    @staticmethod
+    def __to_document(row):
+        return {
             "name": row["name"],
             "image_id": row["image_id"],
             "actor_id": row["actor_id"],
@@ -65,22 +65,19 @@ class Faces:
             "year": row["year"],
         }
 
-        result = self.es.update(index=self.INDEX, id=row["id"], body={"doc": data_dict})
+    def update_one(self, row):
+        self.__check_index()
+        result = self.es.update(
+            index=self.INDEX, id=row["id"], body={"doc": self.__to_document(row)}
+        )
         print(result)
 
     def insert_one(self, row):
+        """Create or fully replace the document with id ``row["id"]``."""
         self.__check_index()
-
-        data_dict = {
-            "name": row["name"],
-            "image_id": row["image_id"],
-            "actor_id": row["actor_id"],
-            "face_encoding": row["face_encoding"],
-            "age": row["age"],
-            "birthday": row["birthday"],
-            "year": row["year"],
-        }
-        result = self.es.index(index=self.INDEX, id=row["id"], document=data_dict)
+        result = self.es.index(
+            index=self.INDEX, id=row["id"], document=self.__to_document(row)
+        )
         print(result)
 
     def insert_many(self, data):
@@ -89,15 +86,7 @@ class Faces:
         bulk_data = []
 
         for index, row in data.iterrows():
-            data_dict = {
-                "name": row["name"],
-                "image_id": row["image_id"],
-                "actor_id": row["actor_id"],
-                "face_encoding": row["face_encoding"],
-                "age": row["age"],
-                "birthday": row["birthday"],
-                "year": row["year"],
-            }
+            data_dict = self.__to_document(row)
             op_dict = {"index": {"_index": self.INDEX, "_id": row["id"]}}
             bulk_data.append(op_dict)
             bulk_data.append(data_dict)
@@ -108,6 +97,8 @@ class Faces:
     def delete_by_document_id(self, document_id):
         try:
             return self.es.delete(index=self.INDEX, id=document_id)
+        except NotFoundError:
+            return None
         except Exception as ex:
             print(ex)
 
@@ -192,15 +183,9 @@ class Movies:
         print(f"creating '{self.INDEX}' index...")
         self.es.indices.create(index=self.INDEX, settings=_settings, mappings=_mappings)
 
-    def update_one(self, row):
-        self.__check_index()
-        embed = LoadModel().get_embed()
-        vector = tf.constant([row["description"]])
-        embeddings = embed(vector)
-        vector = np.asanyarray(embeddings)
-        vector = vector[0].tolist()
-
-        data_dict = {
+    @staticmethod
+    def __to_document(row, vector):
+        return {
             "title": row["title"],
             "year": row["year"],
             "imdb_id": row["imdb_id"],
@@ -209,47 +194,39 @@ class Movies:
             "description_vector": vector,
         }
 
-        result = self.es.update(index=self.INDEX, id=row["id"], body={"doc": data_dict})
+    def update_one(self, row):
+        self.__check_index()
+        vector = LoadModel().encode([row["description"]])[0]
+        result = self.es.update(
+            index=self.INDEX,
+            id=row["id"],
+            body={"doc": self.__to_document(row, vector)},
+        )
         print(result)
 
     def insert_one(self, row):
+        """Create or fully replace the document with id ``row["id"]``."""
         self.__check_index()
-        embed = LoadModel().get_embed()
-        vector = tf.constant([row["description"]])
-        embeddings = embed(vector)
-        vector = np.asanyarray(embeddings)
-        vector = vector[0].tolist()
-
-        data_dict = {
-            "title": row["title"],
-            "year": row["year"],
-            "imdb_id": row["imdb_id"],
-            "description": row["description"],
-            "celebrities": row["celebrities"],
-            "description_vector": vector,
-        }
-
-        result = self.es.index(index=self.INDEX, id=row["id"], document=data_dict)
+        vector = LoadModel().encode([row["description"]])[0]
+        result = self.es.index(
+            index=self.INDEX, id=row["id"], document=self.__to_document(row, vector)
+        )
         print(result)
 
     def __get_data_bulk(self, data):
-        embed = LoadModel().get_embed()
+        model = LoadModel()
+        rows = [row for _, row in data.iterrows()]
 
-        for index, row in data.iterrows():
-            vector = tf.constant([row["description"]])
-            embeddings = embed(vector)
-            vector = np.asanyarray(embeddings)
-            vector = vector[0].tolist()
-            yield {
-                "_index": self.INDEX,
-                "_id": row["id"],
-                "title": row["title"],
-                "year": row["year"],
-                "imdb_id": row["imdb_id"],
-                "description": row["description"],
-                "celebrities": row["celebrities"],
-                "description_vector": vector,
-            }
+        # Encode descriptions in batches instead of one model call per row.
+        for start in range(0, len(rows), EMBED_BATCH_SIZE):
+            batch = rows[start : start + EMBED_BATCH_SIZE]
+            vectors = model.encode([row["description"] for row in batch])
+            for row, vector in zip(batch, vectors):
+                yield {
+                    "_index": self.INDEX,
+                    "_id": row["id"],
+                    **self.__to_document(row, vector),
+                }
 
     def insert_many(self, data):
         self.__check_index()
@@ -257,7 +234,10 @@ class Movies:
         print(res)
 
     def delete_by_document_id(self, document_id):
-        return self.es.delete(index=self.INDEX, id=document_id)
+        try:
+            return self.es.delete(index=self.INDEX, id=document_id)
+        except NotFoundError:
+            return None
 
     def get_by_document_id(self, document_id):
         return self.es.get(index=self.INDEX, id=document_id)
@@ -271,11 +251,7 @@ class Movies:
         script_query_knn = None
 
         if description:
-            embed = LoadModel().get_embed()
-            x = tf.constant([description])
-            embeddings = embed(x)
-            x = np.asanyarray(embeddings)
-            vector = x[0].tolist()
+            vector = LoadModel().encode([description])[0]
             script_query_knn = {
                 "field": "description_vector",
                 "query_vector": vector,
@@ -318,7 +294,9 @@ class Movies:
         )
         return response
 
-    def query_movie_listing(self, size=config.SIZE_MOVIE_LISTING):
+    def query_movie_listing(self, size=None):
+        # Read the constance value at call time, not at import time, so admin changes apply.
+        size = size if size is not None else config.SIZE_MOVIE_LISTING
         query = {"match_all": {}}
         sort = [{"title": {"order": "asc"}}]
         response = self.es.search(

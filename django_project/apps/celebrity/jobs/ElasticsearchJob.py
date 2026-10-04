@@ -22,9 +22,13 @@ class ElasticsearchJob(InterfaceJob):
 
     @override
     def internal_process(self, item_id: str) -> bool:
-        obj_elasticsearch = self.JOB_MODEL.objects.get(id=item_id)
-        faces = Faces()
+        obj_elasticsearch = self.JOB_MODEL.objects.select_related(
+            "actor_image__actor"
+        ).get(id=item_id)
         face_encodings, image = self.get_encoding(obj_elasticsearch.actor_image)
+        if not face_encodings:
+            # Nothing to index: skip the (expensive) DeepFace age estimation.
+            return False
 
         try:
             detected_face = cv2.resize(image, (224, 224))
@@ -45,28 +49,24 @@ class ElasticsearchJob(InterfaceJob):
             if birthday and len(birthday) <= 7:
                 birthday = re.sub(r"[^\d]", "", birthday)
             birthday = pd.to_datetime(birthday)
-            if birthday:
+            if birthday and age is not None:
                 future_date = (birthday + relativedelta(years=age)).year
         except Exception as ex:
             birthday = None
             print(ex)
 
-        for face_encoding in face_encodings:
-            data_dict = {
-                "id": str(obj_elasticsearch.id),
-                "name": obj_elasticsearch.actor_image.actor.name,
-                "image_id": str(obj_elasticsearch.actor_image.id),
-                "actor_id": str(obj_elasticsearch.actor_image.actor.id),
-                "face_encoding": face_encoding.tolist(),
-                "age": age,
-                "birthday": birthday,
-                "year": future_date
-            }
+        # One document per actor image: ActorImageJob only keeps images with exactly one face.
+        data_dict = {
+            "id": str(obj_elasticsearch.id),
+            "name": obj_elasticsearch.actor_image.actor.name,
+            "image_id": str(obj_elasticsearch.actor_image.id),
+            "actor_id": str(obj_elasticsearch.actor_image.actor.id),
+            "face_encoding": face_encodings[0].tolist(),
+            "age": age,
+            "birthday": birthday,
+            "year": future_date,
+        }
 
-            if faces.check_by_document_id(item_id):
-                faces.update_one(data_dict)
-            else:
-                faces.insert_one(data_dict)
-
-            return True
-        return False
+        # index() creates or replaces the document, so no exists() round trip is needed.
+        Faces().insert_one(data_dict)
+        return True

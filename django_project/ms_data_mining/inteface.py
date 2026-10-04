@@ -29,10 +29,10 @@ class InterfaceJob:
             lst_prop = self.JOB_MODEL.objects.filter(query).order_by(
                 "attempt", "created"
             )[: self.size]
-        [self.lst_items.append({"id": str(item.id)}) for item in lst_prop]
+        self.__collect_ids(lst_prop)
 
         self.JOB_MODEL.objects.filter(
-            id__in=list(map(lambda x: x["id"], self.lst_items))
+            id__in=[item["id"] for item in self.lst_items]
         ).update(status=StatusEnum.RUNNING, updated=timezone.now())
 
         self.__process_item()
@@ -56,6 +56,12 @@ class InterfaceJob:
 
             self.update_task(item["id"])
 
+    def __collect_ids(self, queryset):
+        # Only fetch the primary keys: the job models can hold large JSON payloads.
+        self.lst_items.extend(
+            {"id": str(item_id)} for item_id in queryset.values_list("id", flat=True)
+        )
+
     def internal_process(self, item_id: str) -> bool:
         pass
 
@@ -72,10 +78,10 @@ class InterfaceJob:
 
         lst_prop = self.JOB_MODEL.objects.filter(query).order_by("created")
 
-        [self.lst_items.append({"id": str(item.id)}) for item in lst_prop]
+        self.__collect_ids(lst_prop)
 
         self.JOB_MODEL.objects.filter(
-            id__in=list(map(lambda x: x["id"], self.lst_items))
+            id__in=[item["id"] for item in self.lst_items]
         ).update(
             status=StatusEnum.EXPIRED,
             updated=timezone.now(),
@@ -94,10 +100,10 @@ class InterfaceJob:
                 : self.size
             ]
 
-        [self.lst_items.append({"id": str(item.id)}) for item in lst_prop]
+        self.__collect_ids(lst_prop)
 
         self.JOB_MODEL.objects.filter(
-            id__in=list(map(lambda x: x["id"], self.lst_items))
+            id__in=[item["id"] for item in self.lst_items]
         ).update(
             status=StatusEnum.READY,
             attempt=F("attempt") + 1,
@@ -122,10 +128,10 @@ class InterfaceJob:
                 : self.size
             ]
 
-        [self.lst_items.append({"id": str(item.id)}) for item in lst_prop]
+        self.__collect_ids(lst_prop)
 
         self.JOB_MODEL.objects.filter(
-            id__in=list(map(lambda x: x["id"], self.lst_items))
+            id__in=[item["id"] for item in self.lst_items]
         ).update(
             status=StatusEnum.READY,
             attempt=0,

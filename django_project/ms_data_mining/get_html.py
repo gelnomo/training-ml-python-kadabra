@@ -9,7 +9,7 @@ def download_page(url: str) -> object:
         agent = ua.random
         headers = {"User-Agent": agent}
         req = urllib.request.Request(url, headers=headers)
-        resp = urllib.request.urlopen(req)
+        resp = urllib.request.urlopen(req, timeout=30)
         resp_data = str(resp.read())
         return BeautifulSoup(resp_data, "html.parser")
     except Exception as e:

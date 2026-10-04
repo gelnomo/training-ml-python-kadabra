@@ -1,5 +1,5 @@
 import io
-from time import sleep
+from html import escape
 from constance import config
 from django.http import HttpResponse
 import requests
@@ -58,8 +58,10 @@ Let's get started on our movie-finding adventure! 🎬✨
 
     @staticmethod
     async def movie_listing(update, user):
-        hash_key = rd.get_unique_name("movie", f"list.{user}")
-        payload = rd().get_data(hash_key)
+        # The listing is the same for every user, so cache it once (keyed by size).
+        hash_key = rd.get_unique_name("movie", f"list.{config.SIZE_MOVIE_LISTING}")
+        cache = rd()
+        payload = cache.get_data(hash_key)
         if payload is None:
             time_type = TimeTypeEnum(config.MOVIE_LIST_TIME_TYPE)
             time_value = config.MOVIE_LIST_TIME_VALUE
@@ -68,10 +70,11 @@ Let's get started on our movie-finding adventure! 🎬✨
             payload = movies.query_movie_listing()
             _movie_listing = []
             for item, hit in enumerate(payload["hits"]["hits"]):
-                _movie_listing.append(f'<b>{item + 1}</b>. {hit["_source"]["title"]} ({hit["_source"]["year"]})')
+                title = escape(str(hit["_source"]["title"]), quote=False)
+                _movie_listing.append(f'<b>{item + 1}</b>. {title} ({hit["_source"]["year"]})')
             payload = f"🎥 <b>TOP {config.SIZE_MOVIE_LISTING} - MOVIE LIST:</b>\n\n"
             payload += "\n".join(_movie_listing)
-            rd().set_data(hash_key, payload, time_type, time_value)
+            cache.set_data(hash_key, payload, time_type, time_value)
 
         await update.message.reply_text(payload, parse_mode="HTML")
 
@@ -113,6 +116,10 @@ Let's get started on our movie-finding adventure! 🎬✨
                 await self.callbacks(query)
                 return
 
+            if update.message is None:
+                # edited messages, channel posts, etc. are not handled
+                return
+
             await update.message.reply_chat_action(action="typing")
             user = update.message.from_user
 
@@ -123,9 +130,10 @@ Let's get started on our movie-finding adventure! 🎬✨
                 await self.conversation(update, message, user)
         except Exception as ex:
             print(ex)
-            await update.message.reply_text(
-                f"There was an error.", reply_markup=ReplyKeyboardRemove()
-            )
+            if update.message is not None:
+                await update.message.reply_text(
+                    "There was an error.", reply_markup=ReplyKeyboardRemove()
+                )
 
     @staticmethod
     async def conversation(update, message, user):
@@ -157,33 +165,27 @@ Let's get started on our movie-finding adventure! 🎬✨
             await update.message.reply_text(text=replay_message, parse_mode="HTML")
 
     @staticmethod
-    def subscribe():
-        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/setWebhook?url={settings.BOT_URL}"
-
+    def __telegram_api(method, params):
+        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/{method}"
         headers = {"accept": "application/json", "content-type": "application/json"}
 
-        response = requests.get(url, headers=headers)
+        # requests URL-encodes the parameters (BOT_URL may contain query strings).
+        response = requests.get(url, params=params, headers=headers, timeout=15)
 
-        django_response = HttpResponse(
+        return HttpResponse(
             content=response.content,
             status=response.status_code,
-            content_type=response.headers["Content-Type"],
+            content_type=response.headers.get("Content-Type", "application/json"),
         )
 
-        return django_response
+    @staticmethod
+    def subscribe():
+        params = {"url": settings.BOT_URL}
+        if settings.BOT_SECRET_TOKEN:
+            params["secret_token"] = settings.BOT_SECRET_TOKEN
+        return TelegramBot.__telegram_api("setWebhook", params)
 
     @staticmethod
     def unsubscribe():
-        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/setWebhook?remove="
-
-        headers = {"accept": "application/json", "content-type": "application/json"}
-
-        response = requests.get(url, headers=headers)
-
-        django_response = HttpResponse(
-            content=response.content,
-            status=response.status_code,
-            content_type=response.headers["Content-Type"],
-        )
-
-        return django_response
+        # An empty url removes the webhook integration.
+        return TelegramBot.__telegram_api("setWebhook", {"url": ""})

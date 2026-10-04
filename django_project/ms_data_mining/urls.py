@@ -22,7 +22,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from django.conf.urls.static import static
-from ms_data_mining import settings
+from django.conf import settings
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -30,7 +30,7 @@ urlpatterns = [
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
-    path(f"bot/", include("apps.celebrity.urls")),
+    path("bot/", include("apps.celebrity.urls")),
 ]
 
 if settings.DEBUG:

@@ -9,28 +9,30 @@ class ElasticsearchJob(InterfaceJob):
 
     @override
     def internal_process(self, item_id: str) -> bool:
-        obj_elasticsearch = self.JOB_MODEL.objects.get(id=item_id)
-        movies = Movies()
+        obj_elasticsearch = self.JOB_MODEL.objects.select_related("movie").get(
+            id=item_id
+        )
+        movie = obj_elasticsearch.movie
 
-        celebrities = [{"id": str(item.actor.id), "name": item.actor.name.strip()} for item in
-                       obj_elasticsearch.movie.movieactor_set.all()]
+        # select_related avoids one extra query per actor.
+        celebrities = [
+            {"id": str(item.actor.id), "name": item.actor.name.strip()}
+            for item in movie.movieactor_set.select_related("actor").all()
+        ]
 
-        description = f"{obj_elasticsearch.movie.description}." \
-                      f"{obj_elasticsearch.movie.name}." \
-                      f"{obj_elasticsearch.movie.director_name}"
+        description = f"{movie.description}." f"{movie.name}." f"{movie.director_name}"
+        year = str(movie.year or "")
 
         data_dict = {
             "id": str(obj_elasticsearch.id),
-            "title": obj_elasticsearch.movie.name,
-            "year": int(obj_elasticsearch.movie.year) if obj_elasticsearch.movie.year.isnumeric() else 0,
-            "imdb_id": str(obj_elasticsearch.movie.imdb_id),
+            "title": movie.name,
+            "year": int(year) if year.isnumeric() else 0,
+            "imdb_id": str(movie.imdb_id),
             "description": description,
-            "celebrities": celebrities
+            "celebrities": celebrities,
         }
 
-        if movies.check_by_document_id(item_id):
-            movies.update_one(data_dict)
-        else:
-            movies.insert_one(data_dict)
+        # index() creates or replaces the document, so no exists() round trip is needed.
+        Movies().insert_one(data_dict)
 
         return True
