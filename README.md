@@ -243,6 +243,7 @@ docker-compose.yml    # PostgreSQL, Redis, Elasticsearch for local development
 
 ## Credits and license
 
-Based on [**Kadabra_public**](https://github.com/ijzepeda/Kadabra_public), a collaborative project. Thanks to everyone who contributed to it.
+Based on [**Kadabra_public**](https://github.com/ijzepeda/Kadabra_public), a collaborative project. 
+Thanks to everyone who contributed to it.
 
 Released under the [MIT License](LICENSE).
