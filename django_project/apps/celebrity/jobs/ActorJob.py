@@ -1,3 +1,4 @@
+import logging
 import os
 import errno
 import random
@@ -9,11 +10,11 @@ from ms_data_mining.inteface import InterfaceJob
 from apps.celebrity.models import Actor, ActorImage
 from django.conf import settings
 from apps.celebrity.enums import KeywordsEnum
-import cv2
 import urllib.request
 import numpy as np
 import re
-import emoji
+
+logger = logging.getLogger(__name__)
 
 
 class ActorJob(InterfaceJob):
@@ -51,14 +52,15 @@ class ActorJob(InterfaceJob):
     def __identify_image(self, url):
         url = re.sub("V1_.+\.jpg", "V1_FMjpg_UX710_.jpg", url)
 
-        req = urllib.request.urlopen(url)
-        print("VALIDATE IMAGE: ", url, end=" ")
+        import cv2
+
+        req = urllib.request.urlopen(url, timeout=30)
         arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
 
         number_faces = []
+        img = cv2.imdecode(arr, -1)  # decode once, not once per cascade
         for item in self.HAARCASCADE:
             cascade = cv2.CascadeClassifier(f"apps/celebrity/jobs/haarcascade/{item}")
-            img = cv2.imdecode(arr, -1)
             faces = cascade.detectMultiScale(
                 image=img,
                 scaleFactor=1.1,
@@ -89,7 +91,7 @@ class ActorJob(InterfaceJob):
 
     def __image_from_imdb(self, actor, page):
         webpage = f"https://www.imdb.com/name/{actor.imdb_id}/mediaindex?page={page}"
-        print("GET IMAGES IMDB:", webpage)
+        logger.info("Get images IMDb: %s", webpage)
 
         content = download_page(webpage)
         images = self.__get_image(content)
@@ -109,11 +111,7 @@ class ActorJob(InterfaceJob):
                     url=_image[0],
                     defaults={"status": StatusEnum.READY},
                 )
-            print(
-                emoji.emojize(":thumbs_up:")
-                if is_valid
-                else emoji.emojize(":collision:")
-            )
+            logger.debug("Image %s valid=%s", _image[0], is_valid)
         return result + self.__image_from_imdb(actor, page + 1)
 
     def __image_from_google(self, actor, search):
@@ -129,7 +127,7 @@ class ActorJob(InterfaceJob):
 
             pure_keyword = keyword.replace(" ", "%20")
             url = f"https://www.google.com/search?q={search}{pure_keyword}&espv=2&biw=1366&bih=667&site=webhp&source=lnms&tbm=isch&sa=X&ei=XosDVaCXD8TasATItgE&ved=0CAcQ_AUoAg"
-            print("GET IMAGES GOOGLE:", url)
+            logger.info("Get images Google: %s", url)
             raw_html = download_page(url)
             time.sleep(random.randint(1, 4))
             items = self.__images_get_all_items(raw_html)
@@ -143,11 +141,7 @@ class ActorJob(InterfaceJob):
                         url=_image[0],
                         defaults={"status": StatusEnum.READY},
                     )
-                print(
-                    emoji.emojize(":thumbs_up:")
-                    if is_valid
-                    else emoji.emojize(":collision:")
-                )
+                logger.debug("Image %s valid=%s", _image[0], is_valid)
 
     @staticmethod
     def __images_get_all_items(page):
@@ -186,4 +180,4 @@ class ActorJob(InterfaceJob):
                 obj_actor.save()
                 break
         except Exception as ex:
-            print(ex)
+            logger.warning("Could not get the birthday of %s: %s", obj_actor, ex)

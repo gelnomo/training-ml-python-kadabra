@@ -57,6 +57,9 @@ class ActorImage(models.Model):
         choices=StatusEnum.choices,
     )
     is_valid = models.BooleanField(blank=True, null=True)
+    # 128-d face_recognition encoding, saved when the image is validated so the
+    # Elasticsearch job doesn't have to detect and encode the face again.
+    face_encoding = models.JSONField(blank=True, null=True, editable=False)
     attempt = models.IntegerField(default=0, null=False, blank=False)
     created = models.DateTimeField(
         null=False, blank=False, auto_now_add=True, editable=False

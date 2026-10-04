@@ -1,3 +1,5 @@
+import logging
+import datetime
 import random
 
 from overrides import override
@@ -12,6 +14,8 @@ from django.conf import settings
 import json
 from django.utils.text import slugify
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class MovieJob(InterfaceJob):
@@ -357,7 +361,7 @@ class MovieJob(InterfaceJob):
     def internal_process(self, item_id: str) -> bool:
         is_completed = True
         obj_movie = self.JOB_MODEL.objects.get(id=item_id)
-        print(f"Processing: {obj_movie.name}")
+        logger.info("Processing: %s", obj_movie.name)
         self.__download_movie_info(obj_movie)
         self.__get_credits(obj_movie)
         self.__get_synopsis(obj_movie)
@@ -366,12 +370,14 @@ class MovieJob(InterfaceJob):
 
     @staticmethod
     def __create_actors(obj_movie):
-        imdb_ids = obj_movie.starts_id.split(",")
-        celebrities = obj_movie.starts_name.split(",")
+        imdb_ids = (obj_movie.starts_id or "").split(",")
+        celebrities = (obj_movie.starts_name or "").split(",")
 
         for key, value in enumerate(celebrities):
+            if not value.strip():
+                continue
             imdb_id = None
-            if key <= len(imdb_ids):
+            if key < len(imdb_ids):
                 imdb_id = imdb_ids[key]
             try:
                 obj_actor, created = Actor.objects.get_or_create(
@@ -379,7 +385,7 @@ class MovieJob(InterfaceJob):
                 )
                 MovieActor.objects.get_or_create(movie=obj_movie, actor=obj_actor)
             except Exception as ex:
-                print(ex)
+                logger.warning("Could not create actor %r: %s", value, ex)
 
     @staticmethod
     def __get_info_movie(year, name, obj_movie):
@@ -392,152 +398,37 @@ class MovieJob(InterfaceJob):
 
         if year != 0:
             url = f"http://www.omdbapi.com/?{filters}&y={str(year)}&apikey={settings.IMDBID_APIKEY}"
-            with urllib.request.urlopen(url) as response:
+            with urllib.request.urlopen(url, timeout=30) as response:
                 payload = json.load(response)
             if payload["Response"] == "True":
                 movie_url = f"www.imdb.com/title/{payload['imdbID']}"
         else:
             url = f"http://www.omdbapi.com/?{filters}&apikey={settings.IMDBID_APIKEY}"
-            with urllib.request.urlopen(url) as response:
+            with urllib.request.urlopen(url, timeout=30) as response:
                 payload = json.load(response)
             if payload["Response"] == "True":
                 movie_url = f"www.imdb.com/title/{payload.get('imdbID', None)}"
 
         return movie_url, payload
 
+    # download_page() returns str(bytes), so non-ASCII characters arrive as literal
+    # "\\xNN" escape sequences (e.g. "\\xc3\\xa9" for "é").
+    ESCAPED_BYTES = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
+    # C1 control characters and the non-breaking space are dropped.
+    DROPPED_CHARS = re.compile("[\u0080-\u00a0]")
+
     @staticmethod
-    def __change_chars(obj_str):
+    def __decode_escaped_bytes(match):
+        raw = bytes.fromhex(match.group(0).replace("\\x", ""))
+        return raw.decode("utf-8", errors="ignore")
+
+    @classmethod
+    def __change_chars(cls, obj_str):
         # Remove/replace special chars
         value = obj_str.replace(r"\n", "")
         value = value.replace(r"\'", "'")
-        value = value.replace(r'\xc2\x80', '')
-        value = value.replace(r'\xc2\x81', '')
-        value = value.replace(r'\xc2\x82', '')
-        value = value.replace(r'\xc2\x83', '')
-        value = value.replace(r'\xc2\x84', '')
-        value = value.replace(r'\xc2\x85', '')
-        value = value.replace(r'\xc2\x86', '')
-        value = value.replace(r'\xc2\x87', '')
-        value = value.replace(r'\xc2\x88', '')
-        value = value.replace(r'\xc2\x89', '')
-        value = value.replace(r'\xc2\x8a', '')
-        value = value.replace(r'\xc2\x8b', '')
-        value = value.replace(r'\xc2\x8c', '')
-        value = value.replace(r'\xc2\x8d', '')
-        value = value.replace(r'\xc2\x8e', '')
-        value = value.replace(r'\xc2\x8f', '')
-        value = value.replace(r'\xc2\x90', '')
-        value = value.replace(r'\xc2\x91', '')
-        value = value.replace(r'\xc2\x92', '')
-        value = value.replace(r'\xc2\x93', '')
-        value = value.replace(r'\xc2\x94', '')
-        value = value.replace(r'\xc2\x95', '')
-        value = value.replace(r'\xc2\x96', '')
-        value = value.replace(r'\xc2\x97', '')
-        value = value.replace(r'\xc2\x98', '')
-        value = value.replace(r'\xc2\x99', '')
-        value = value.replace(r'\xc2\x9a', '')
-        value = value.replace(r'\xc2\x9b', '')
-        value = value.replace(r'\xc2\x9c', '')
-        value = value.replace(r'\xc2\x9d', '')
-        value = value.replace(r'\xc2\x9e', '')
-        value = value.replace(r'\xc2\x9f', '')
-        value = value.replace(r'\xc2\xa0', '')
-        value = value.replace(r'\xc2\xa1', '¡')
-        value = value.replace(r'\xc2\xa2', '¢')
-        value = value.replace(r'\xc2\xa3', '£')
-        value = value.replace(r'\xc2\xa4', '¤')
-        value = value.replace(r'\xc2\xa5', '¥')
-        value = value.replace(r'\xc2\xa6', '¦')
-        value = value.replace(r'\xc2\xa7', '§')
-        value = value.replace(r'\xc2\xa8', '¨')
-        value = value.replace(r'\xc2\xa9', '©')
-        value = value.replace(r'\xc2\xaa', 'ª')
-        value = value.replace(r'\xc2\xab', '«')
-        value = value.replace(r'\xc2\xac', '¬')
-        value = value.replace(r'\xc2\xad', '­')
-        value = value.replace(r'\xc2\xae', '®')
-        value = value.replace(r'\xc2\xaf', '¯')
-        value = value.replace(r'\xc2\xb0', '°')
-        value = value.replace(r'\xc2\xb1', '±')
-        value = value.replace(r'\xc2\xb2', '²')
-        value = value.replace(r'\xc2\xb3', '³')
-        value = value.replace(r'\xc2\xb4', '´')
-        value = value.replace(r'\xc2\xb5', 'µ')
-        value = value.replace(r'\xc2\xb6', '¶')
-        value = value.replace(r'\xc2\xb7', '·')
-        value = value.replace(r'\xc2\xb8', '¸')
-        value = value.replace(r'\xc2\xb9', '¹')
-        value = value.replace(r'\xc2\xba', 'º')
-        value = value.replace(r'\xc2\xbb', '»')
-        value = value.replace(r'\xc2\xbc', '¼')
-        value = value.replace(r'\xc2\xbd', '½')
-        value = value.replace(r'\xc2\xbe', '¾')
-        value = value.replace(r'\xc2\xbf', '¿')
-        value = value.replace(r'\xc3\x80', 'À')
-        value = value.replace(r'\xc3\x81', 'Á')
-        value = value.replace(r'\xc3\x82', 'Â')
-        value = value.replace(r'\xc3\x83', 'Ã')
-        value = value.replace(r'\xc3\x84', 'Ä')
-        value = value.replace(r'\xc3\x85', 'Å')
-        value = value.replace(r'\xc3\x86', 'Æ')
-        value = value.replace(r'\xc3\x87', 'Ç')
-        value = value.replace(r'\xc3\x88', 'È')
-        value = value.replace(r'\xc3\x89', 'É')
-        value = value.replace(r'\xc3\x8a', 'Ê')
-        value = value.replace(r'\xc3\x8b', 'Ë')
-        value = value.replace(r'\xc3\x8c', 'Ì')
-        value = value.replace(r'\xc3\x8d', 'Í')
-        value = value.replace(r'\xc3\x8e', 'Î')
-        value = value.replace(r'\xc3\x8f', 'Ï')
-        value = value.replace(r'\xc3\x90', 'Ð')
-        value = value.replace(r'\xc3\x91', 'Ñ')
-        value = value.replace(r'\xc3\x92', 'Ò')
-        value = value.replace(r'\xc3\x93', 'Ó')
-        value = value.replace(r'\xc3\x94', 'Ô')
-        value = value.replace(r'\xc3\x95', 'Õ')
-        value = value.replace(r'\xc3\x96', 'Ö')
-        value = value.replace(r'\xc3\x97', '×')
-        value = value.replace(r'\xc3\x98', 'Ø')
-        value = value.replace(r'\xc3\x99', 'Ù')
-        value = value.replace(r'\xc3\x9a', 'Ú')
-        value = value.replace(r'\xc3\x9b', 'Û')
-        value = value.replace(r'\xc3\x9c', 'Ü')
-        value = value.replace(r'\xc3\x9d', 'Ý')
-        value = value.replace(r'\xc3\x9e', 'Þ')
-        value = value.replace(r'\xc3\x9f', 'ß')
-        value = value.replace(r'\xc3\xa0', 'à')
-        value = value.replace(r'\xc3\xa1', 'á')
-        value = value.replace(r'\xc3\xa2', 'â')
-        value = value.replace(r'\xc3\xa3', 'ã')
-        value = value.replace(r'\xc3\xa4', 'ä')
-        value = value.replace(r'\xc3\xa5', 'å')
-        value = value.replace(r'\xc3\xa6', 'æ')
-        value = value.replace(r'\xc3\xa7', 'ç')
-        value = value.replace(r'\xc3\xa8', 'è')
-        value = value.replace(r'\xc3\xa9', 'é')
-        value = value.replace(r'\xc3\xaa', 'ê')
-        value = value.replace(r'\xc3\xab', 'ë')
-        value = value.replace(r'\xc3\xac', 'ì')
-        value = value.replace(r'\xc3\xad', 'í')
-        value = value.replace(r'\xc3\xae', 'î')
-        value = value.replace(r'\xc3\xaf', 'ï')
-        value = value.replace(r'\xc3\xb0', 'ð')
-        value = value.replace(r'\xc3\xb1', 'ñ')
-        value = value.replace(r'\xc3\xb2', 'ò')
-        value = value.replace(r'\xc3\xb3', 'ó')
-        value = value.replace(r'\xc3\xb4', 'ô')
-        value = value.replace(r'\xc3\xb5', 'õ')
-        value = value.replace(r'\xc3\xb6', 'ö')
-        value = value.replace(r'\xc3\xb7', '÷')
-        value = value.replace(r'\xc3\xb8', 'ø')
-        value = value.replace(r'\xc3\xb9', 'ù')
-        value = value.replace(r'\xc3\xba', 'ú')
-        value = value.replace(r'\xc3\xbb', 'û')
-        value = value.replace(r'\xc3\xbc', 'ü')
-        value = value.replace(r'\xc3\xbd', 'ý')
-        value = value.replace(r'\xc3\xbe', 'þ')
-        value = value.replace(r'\xc3\xbf', 'ÿ')
+        value = cls.ESCAPED_BYTES.sub(cls.__decode_escaped_bytes, value)
+        value = cls.DROPPED_CHARS.sub("", value)
 
         return value
 
@@ -577,13 +468,13 @@ class MovieJob(InterfaceJob):
             obj_movie.starts_id = ",".join(starts_id)
             obj_movie.starts_name = ",".join(starts_name)
             obj_movie.save()
-        except Exception as ex:
-            print(ex)
+        except Exception:
+            logger.exception("MovieJob step failed for %s", obj_movie.imdb_id)
 
     def __download_movie_info(self, obj_movie):
         year = 0
         name = obj_movie.name
-        for y in range(1900, 2014):
+        for y in range(1900, datetime.date.today().year + 2):
             if str(y) in obj_movie.name:
                 name = obj_movie.name.replace(str(y), " ")
                 year = y
@@ -599,7 +490,7 @@ class MovieJob(InterfaceJob):
 
         if (
                 payload.get("imdbID", "").lower().strip()
-                != obj_movie.imdb_id.lower().strip()
+                != (obj_movie.imdb_id or "").lower().strip()
         ):
             obj_movie.payload = payload
             obj_movie.save()
@@ -617,7 +508,7 @@ class MovieJob(InterfaceJob):
         obj_movie.director_name = payload.get("Director", None)
         obj_movie.starts_name = payload.get("Actors", None)
         obj_movie.description = payload.get("Plot", None)
-        obj_movie.payload = payload.get("payload", None)
+        # keep the full OMDb response (it was overwritten with None before); the poster URL is in it
         obj_movie.url = movie_url
         obj_movie.save()
 
@@ -627,7 +518,7 @@ class MovieJob(InterfaceJob):
             raw_html = download_page(url)
             time.sleep(random.randint(1, 4))
 
-            items = [
+            items = [] if raw_html is None else [
                 detail.find_all("div", "ipc-html-content-inner-div")[0]
                 for content in raw_html.find_all("div", class_="sc-f65f65be-0 fVkLRr")
                 if content.get("data-testid") == "sub-section-synopsis"
@@ -637,7 +528,7 @@ class MovieJob(InterfaceJob):
                 if detail.find_all("div", "ipc-html-content-inner-div")
             ]
             if items:
-                obj_movie.description += f"\n{items[0].text}"
+                obj_movie.description = f"{obj_movie.description or ''}\n{items[0].text}"
                 obj_movie.description = self.__change_chars(obj_movie.description)
             obj_movie.save()
 
@@ -645,5 +536,5 @@ class MovieJob(InterfaceJob):
                 movie=obj_movie,
                 defaults={"status": StatusEnum.READY, "attempt": 0},
             )
-        except Exception as ex:
-            print(ex)
+        except Exception:
+            logger.exception("MovieJob step failed for %s", obj_movie.imdb_id)

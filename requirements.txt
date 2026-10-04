@@ -177,3 +177,8 @@ yarl==1.9.2
 zipp==3.15.0
 zope.event==5.0
 zope.interface==6.0
+
+# Imported by apps/celebrity/jobs/ElasticsearchJob.py but missing from the list above.
+# Not pinned yet: pin them to the versions that work with tensorflow==2.13.0.
+deepface
+pandas

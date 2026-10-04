@@ -1,0 +1,13 @@
+# One JSON object per line. Lines starting with "#" are ignored.
+# Fields:
+#   id                (optional) a name for the case
+#   expected_imdb_id  the correct answer, e.g. "tt0133093"; the movie must be indexed.
+#                     Use null for a NEGATIVE case: a movie that is NOT in your collection
+#                     (the bot should answer "not enough information"). ~10-20% negatives
+#                     let evaluate_search learn which scores to reject.
+#   text              (optional) a synopsis written the way a user would describe the movie
+#   image             (optional) path to a screenshot/photo, relative to this file
+# A case needs text, image or both. Example (remove the leading "# " to use it):
+# {"id": "matrix-text", "expected_imdb_id": "tt0133093", "text": "a hacker learns that the world is a computer simulation and joins rebels fighting the machines"}
+# {"id": "matrix-photo", "expected_imdb_id": "tt0133093", "image": "images/matrix_lobby.jpg"}
+# {"id": "negative-1", "expected_imdb_id": null, "text": "describe here a movie you know is not indexed"}

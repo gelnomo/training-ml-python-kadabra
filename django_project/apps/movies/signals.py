@@ -1,19 +1,18 @@
+from django.conf import settings
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
-import os
-from apps.document.schema import Movies
+
+from apps.document.schema import MoviePassages, MoviePosters, Movies
 from apps.movies.models import ElasticSearchMovie
-
-
-def delete_index_movie(elastic_image):
-    try:
-        Movies().delete_by_document_id(str(elastic_image.id))
-        if os.path.exists(elastic_image.actor_image.path):
-            os.remove(elastic_image.actor_image.path)
-    except ElasticSearchMovie.DoesNotExist:
-        pass
 
 
 @receiver(post_delete, sender=ElasticSearchMovie)
 def movie_post_delete(sender, instance, **kwargs):
-    delete_index_movie(instance)
+    # ElasticSearchMovie has no file on disk (unlike ElasticSearchActorImage),
+    # so only the Elasticsearch documents have to be removed.
+    document_id = str(instance.id)
+    Movies().delete_by_document_id(document_id)
+    if settings.INDEX_MOVIE_PASSAGES:
+        MoviePassages().delete_movie(document_id)
+    if settings.INDEX_MOVIE_POSTERS:
+        MoviePosters().delete_by_document_id(document_id)

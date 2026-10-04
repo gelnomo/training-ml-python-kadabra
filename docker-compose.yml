@@ -1,0 +1,54 @@
+# Local services for development and tests: PostgreSQL, Redis and Elasticsearch.
+#
+#   docker compose up -d
+#   cp .env.example .env            # then: export SECRETS_PATH_FILE=$PWD/.env
+#   cd django_project && python manage.py migrate
+#
+# Elasticsearch runs as a single node with security disabled: for local use only.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kadabra
+      POSTGRES_PASSWORD: kadabra
+      POSTGRES_DB: kadabra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # settings.py uses search_path=ms_data_mining: create the schema on first start.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kadabra"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  elasticsearch:
+    # Same major/minor as the Python client in requirements.txt (elasticsearch==8.8.0).
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.ml.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      retries: 20
+
+volumes:
+  postgres-data:
+  elasticsearch-data:

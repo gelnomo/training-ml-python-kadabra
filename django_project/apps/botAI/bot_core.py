@@ -1,30 +1,65 @@
 import io
-from time import sleep
-from constance import config
-from django.http import HttpResponse
+import logging
+from html import escape
+
 import requests
 import telegram
-from PIL import Image
+from constance import config
 from django.conf import settings
-import json
+from django.http import HttpResponse
+from PIL import Image
+from telegram import ReplyKeyboardRemove
 
+from apps.botAI.search_image import SearchImage, SearchScene
+from apps.botAI.search_text import SearchText, format_results
 from apps.document.schema import Movies
 from ms_data_mining.redis_tools import Utils as rd, TimeTypeEnum
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
-)
 
-from apps.botAI.search_image import SearchImage
-from apps.botAI.search_text import SearchText
+logger = logging.getLogger(__name__)
+
+# Telegram resends an update when the webhook doesn't answer in time; remember
+# processed update ids for this long so a resend isn't processed twice.
+UPDATE_DEDUPE_SECONDS = 24 * 60 * 60
+
+
+def is_new_update(update_id):
+    """
+    True the first time an ``update_id`` is seen (Redis SET NX).
+    Fails open: if Redis is unavailable the update is processed.
+    """
+    if update_id is None:
+        return True
+    try:
+        return bool(
+            rd().r.set(f"telegram-update-{update_id}", 1, nx=True, ex=UPDATE_DEDUPE_SECONDS)
+        )
+    except Exception:
+        logger.exception("Could not check update %s for duplicates", update_id)
+        return True
+
+
+def forget_update(update_id):
+    try:
+        rd().r.delete(f"telegram-update-{update_id}")
+    except Exception:
+        logger.exception("Could not forget update %s", update_id)
 
 
 class TelegramBot:
-    def __init__(self, request):
-        self.telegram_bot = telegram.Bot(token=settings.BOT_TOKEN)
-        self.request = request
+    """
+    Handles one Telegram update. Runs inside a Celery worker (see
+    ``apps.celebrity.tasks.telegram_process_update``), not in the web request,
+    so slow face/text searches never delay the webhook answer.
+    """
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    @classmethod
+    async def handle_update(cls, content):
+        # `async with` initialises the bot's HTTP client and closes it afterwards.
+        async with telegram.Bot(token=settings.BOT_TOKEN) as bot:
+            await cls(bot).ask(content)
 
     @staticmethod
     async def cancel(update, user):
@@ -37,29 +72,22 @@ class TelegramBot:
     async def start(update, user):
         # print the welcoming message
         bot_welcome = f"""
-<b>Hi {user.first_name}! This is a FilmSleuth</b>
+<b>Hi {escape(user.first_name or "", quote=False)}! This is a FilmSleuth</b>
 
 I'm here to help you find the movie you are watching, whether it's by image or synopsis. 🎥🔍
 
 To begin, you can send me a <b>PHOTO</b> of the movie or provide a <b>TEXT</b> synopsis. For better accuracy, try taking a photo where the main characters are on the screen.
 
-Let's get started on our movie-finding adventure! 🎬✨        
+Let's get started on our movie-finding adventure! 🎬✨
 """
         await update.message.reply_text(bot_welcome, parse_mode="HTML")
 
-        # option_buttons = [
-        #     [InlineKeyboardButton("YES", callback_data="model_nlp_k")],
-        #     [InlineKeyboardButton("NO", callback_data="model_cv_k")],
-        # ]
-        # reply_markup = ReplyKeyboardMarkup(keyboard=option_buttons, is_persistent=False, resize_keyboard=True, one_time_keyboard=True)
-        #
-        # reply_markup = InlineKeyboardMarkup(option_buttons)
-        # await update.message.reply_text("[Optional] Select a Model:", reply_markup=reply_markup)
-
     @staticmethod
     async def movie_listing(update, user):
-        hash_key = rd.get_unique_name("movie", f"list.{user}")
-        payload = rd().get_data(hash_key)
+        # The listing is the same for every user, so cache it once (keyed by size).
+        hash_key = rd.get_unique_name("movie", f"list.{config.SIZE_MOVIE_LISTING}")
+        cache = rd()
+        payload = cache.get_data(hash_key)
         if payload is None:
             time_type = TimeTypeEnum(config.MOVIE_LIST_TIME_TYPE)
             time_value = config.MOVIE_LIST_TIME_VALUE
@@ -68,10 +96,11 @@ Let's get started on our movie-finding adventure! 🎬✨
             payload = movies.query_movie_listing()
             _movie_listing = []
             for item, hit in enumerate(payload["hits"]["hits"]):
-                _movie_listing.append(f'<b>{item + 1}</b>. {hit["_source"]["title"]} ({hit["_source"]["year"]})')
+                title = escape(str(hit["_source"]["title"]), quote=False)
+                _movie_listing.append(f'<b>{item + 1}</b>. {title} ({hit["_source"]["year"]})')
             payload = f"🎥 <b>TOP {config.SIZE_MOVIE_LISTING} - MOVIE LIST:</b>\n\n"
             payload += "\n".join(_movie_listing)
-            rd().set_data(hash_key, payload, time_type, time_value)
+            cache.set_data(hash_key, payload, time_type, time_value)
 
         await update.message.reply_text(payload, parse_mode="HTML")
 
@@ -97,20 +126,22 @@ Let's get started on our movie-finding adventure! 🎬✨
 
         return False
 
-    async def ask(self):
-        if not self.request.body:
+    async def ask(self, content):
+        if not content:
             return None
 
         message = None
-
-        content = json.loads(self.request.body)
-        update = telegram.Update.de_json(content, self.telegram_bot)
+        update = telegram.Update.de_json(content, self.bot)
 
         try:
             query = update.callback_query
 
             if query:
                 await self.callbacks(query)
+                return
+
+            if update.message is None:
+                # edited messages, channel posts, etc. are not handled
                 return
 
             await update.message.reply_chat_action(action="typing")
@@ -121,17 +152,20 @@ Let's get started on our movie-finding adventure! 🎬✨
 
             if not await self.is_command(message, update, user):
                 await self.conversation(update, message, user)
-        except Exception as ex:
-            print(ex)
-            await update.message.reply_text(
-                f"There was an error.", reply_markup=ReplyKeyboardRemove()
-            )
+        except Exception:
+            logger.exception("Error while handling update %s", content.get("update_id"))
+            if update.message is not None:
+                await update.message.reply_text(
+                    "There was an error.", reply_markup=ReplyKeyboardRemove()
+                )
 
     @staticmethod
     async def conversation(update, message, user):
-        celebrities = None
+        celebrities = []
+        img = None
+        first_name = (user.first_name or "").capitalize()
         await update.message.reply_text(
-            f"Thank you {user.first_name.capitalize()}!\nI am taking a look at my movie collection, hold on...."
+            f"Thank you {first_name}!\nI am taking a look at my movie collection, hold on...."
         )
         await update.message.reply_chat_action(action="typing")
 
@@ -139,51 +173,52 @@ Let's get started on our movie-finding adventure! 🎬✨
             photo = await update.message.photo[-1].get_file()
             img = Image.open(io.BytesIO(await photo.download_as_bytearray()))
             celebrities = SearchImage(img).process()
+            # A caption sent with the photo is used as the synopsis.
+            message = message or update.message.caption
 
-        if not message and not celebrities:
+        if not message and not celebrities and img is None:
             await update.message.reply_text(
-                f"Sorry {user.first_name.capitalize()}, I need to describe a movie with text or photo"
+                f"Sorry {first_name}, I need to describe a movie with text or photo"
             )
             return
 
-        movie = SearchText(message, celebrities).process()
+        movie = None
+        if message or celebrities:
+            movie = SearchText(message, celebrities).process()
+        elif img is not None and config.SCENE_SEARCH_ENABLED:
+            # No face recognised and no text: try to match the scene with movie posters.
+            movie = format_results(SearchScene(img).search())
 
         if movie:
             await update.message.reply_text(movie, parse_mode="HTML")
         else:
             replay_message = (
-                f"Sorry!. There is not enough information about the movie you describe."
+                "Sorry!. There is not enough information about the movie you describe."
             )
             await update.message.reply_text(text=replay_message, parse_mode="HTML")
 
     @staticmethod
-    def subscribe():
-        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/setWebhook?url={settings.BOT_URL}"
-
+    def __telegram_api(method, params):
+        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/{method}"
         headers = {"accept": "application/json", "content-type": "application/json"}
 
-        response = requests.get(url, headers=headers)
+        # requests URL-encodes the parameters (BOT_URL may contain query strings).
+        response = requests.get(url, params=params, headers=headers, timeout=15)
 
-        django_response = HttpResponse(
+        return HttpResponse(
             content=response.content,
             status=response.status_code,
-            content_type=response.headers["Content-Type"],
+            content_type=response.headers.get("Content-Type", "application/json"),
         )
 
-        return django_response
+    @staticmethod
+    def subscribe():
+        params = {"url": settings.BOT_URL}
+        if settings.BOT_SECRET_TOKEN:
+            params["secret_token"] = settings.BOT_SECRET_TOKEN
+        return TelegramBot.__telegram_api("setWebhook", params)
 
     @staticmethod
     def unsubscribe():
-        url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/setWebhook?remove="
-
-        headers = {"accept": "application/json", "content-type": "application/json"}
-
-        response = requests.get(url, headers=headers)
-
-        django_response = HttpResponse(
-            content=response.content,
-            status=response.status_code,
-            content_type=response.headers["Content-Type"],
-        )
-
-        return django_response
+        # An empty url removes the webhook integration.
+        return TelegramBot.__telegram_api("setWebhook", {"url": ""})
