@@ -8,7 +8,6 @@ It continues the Django backend with:
 - **FilmSleuth**: a Telegram bot that identifies a movie from a **photo** (face recognition + Elasticsearch vector search) or from a **text synopsis** (Universal Sentence Encoder + kNN search).
 - A set of performance, reliability and security fixes on top of the original code.
 
-See **[COMPARISON.md](COMPARISON.md)** for a detailed list of the differences from Kadabra_public and the optimisations made here.
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for how the Elasticsearch vector search works and the improvement roadmap.
 
 ## Project layout
