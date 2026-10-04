@@ -33,3 +33,7 @@ django_project/
 | `CSRF_TRUSTED_ORIGINS` | Comma-separated list of trusted origins |
 
 To register the webhook, log in to `/admin/` as a staff user and open `/bot/webhook/subscribe`.
+
+## License
+
+Released under the [MIT License](LICENSE).
