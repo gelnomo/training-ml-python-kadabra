@@ -247,3 +247,5 @@ Based on [**Kadabra_public**](https://github.com/ijzepeda/Kadabra_public), a col
 Thanks to everyone who contributed to it.
 
 Released under the [MIT License](LICENSE).
+
+<img src="https://ga4-readme-pixel.erwinmongui.workers.dev/pixel.gif?path=training-ml-python-kadabra" width="1" height="1" alt=""/>
